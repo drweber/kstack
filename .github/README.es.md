@@ -12,6 +12,8 @@
 ## Introducción
 
 <img width="350" alt="kstack" src="https://github.com/user-attachments/assets/cfe998de-a85a-44bb-8eb2-5f5efe7449ea" />
+<br>
+<br>
 
 **Kstack** es un paquete de habilidades para Claude Code que te ayuda a realizar tareas de monitoreo, resolución de problemas y auditoría en tus clústeres de K8s de forma inteligente y eficiente. Además de usar herramientas estándar como kubectl, delega el trabajo de shell a herramientas como [Kubetail](https://github.com/kubetail-org/kubetail), [Helm](https://helm.sh), [Trivy](https://github.com/aquasecurity/trivy), [Pluto](https://github.com/FairwindsOps/pluto) antes de enviar los resultados a Claude, manteniendo las respuestas rápidas y eficientes en tokens. Kstack también detecta los servicios que se ejecutan en tu clúster y usa sus herramientas especializadas cuando es necesario (p. ej., [Cilium](https://cilium.io), [Istio](https://istio.io)).
 

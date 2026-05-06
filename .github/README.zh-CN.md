@@ -12,6 +12,8 @@
 ## 简介
 
 <img width="350" alt="kstack" src="https://github.com/user-attachments/assets/cfe998de-a85a-44bb-8eb2-5f5efe7449ea" />
+<br>
+<br>
 
 **Kstack** 是 Claude Code 的技能包，帮助您以智能高效的方式对 K8s 集群执行监控、故障排查和审计任务。除了使用 kubectl 等标准工具外，它还将 shell 工作交给 [Kubetail](https://github.com/kubetail-org/kubetail)、[Helm](https://helm.sh)、[Trivy](https://github.com/aquasecurity/trivy)、[Pluto](https://github.com/FairwindsOps/pluto) 等工具处理后再将结果发送给 Claude，保持响应快速且 token 高效。Kstack 还会检测集群中运行的服务，并在必要时使用其专用工具（例如 [Cilium](https://cilium.io)、[Istio](https://istio.io)）。
 

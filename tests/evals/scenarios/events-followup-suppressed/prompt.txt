@@ -1,0 +1,1 @@
+Run /events --refresh, then show me the suppressed Normal events from namespace eval-events-followup-suppressed (pod name and reason for each).

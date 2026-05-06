@@ -1,0 +1,1 @@
+Open the Kubetail dashboard so I can browse logs for the `api` deployment in the `eval-logs-gui` namespace. I want to see the last 15 minutes and filter for "error".

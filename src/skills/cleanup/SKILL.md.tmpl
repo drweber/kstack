@@ -1,0 +1,37 @@
+---
+name: {{SKILL_NAME}}
+description: Remove all kstack-owned resources from the cluster
+disable-model-invocation: true
+---
+
+{{ENTRYPOINT}}
+
+{{GLOBAL_FLAGS}}
+
+{{PREAMBLE}}
+## Purpose
+
+Remove every resource kstack has created in the cluster. The counterpart to `/forget`, which clears local state. Anything kstack creates is annotated with `kstack.kubetail.com/owned-by=kstack`; resources without that annotation must never be touched, even if they live in the same namespace.
+
+## Arguments
+
+This skill takes no positional arguments. If the user supplies one, respond with the missing/unknown-argument error line defined in the Global flags section and stop.
+
+## Workflow
+
+1. **Discover.** Find every cluster-scoped and namespaced resource carrying the `kstack.kubetail.com/owned-by=kstack` annotation. Use a single bounded `kubectl get` per kind that kstack is known to create — Pods, ConfigMaps, Secrets, ServiceAccounts, Roles, RoleBindings, ClusterRoles, ClusterRoleBindings — filtering server-side by the annotation when supported, and falling back to `-o json | jq` when not. Use `--context=<pinned>` (the pinned context from the entrypoint envelope) on every call so the session stays stable.
+
+2. **Group and list.** Present the matched resources to the user grouped by namespace, then by kind. For cluster-scoped resources use a `(cluster-scoped)` group. Keep the listing compact — one line per resource (`<kind>/<name>` plus age if available). If nothing matches, say so in a single line and end the turn; do not prompt for confirmation in that case.
+
+3. **Confirm.** Before deleting anything, ask the user to confirm. Accept "yes" / "delete all" / "go ahead" as approval for the whole set. Accept natural-language exclusions ("skip the configmaps", "leave kube-system alone", "only the pods in ns/foo") and re-display the reduced set for one more confirmation. Never delete on an ambiguous response — re-ask.
+
+4. **Delete.** Issue one `kubectl delete <kind>/<name> -n <ns>` per approved resource. Do not pass `--force` or `--grace-period=0` unless the user has explicitly asked. Continue past individual failures rather than aborting the whole batch.
+
+5. **Report.** Summarize what was deleted (counts by kind) and what remained. For each failure, surface the resource and the error verbatim from kubectl — finalizers and permission errors are the common cases — so the user can decide how to proceed. Do not retry failed deletes blindly.
+
+## Safety rails
+
+- A resource without the `kstack.kubetail.com/owned-by=kstack` annotation is out of scope. Even if the user says "delete everything in this namespace," reduce that to "delete everything kstack owns in this namespace."
+- Never widen discovery to label selectors, name prefixes, or namespace name patterns as a substitute for the annotation. The annotation is the single source of truth for ownership.
+- Never run `kubectl delete namespace` — kstack owns resources, not namespaces.
+- If the user pre-approves with a flag-shaped token (e.g. `--yes`), still print the discovered set first so the user has one chance to interrupt before any delete fires.

@@ -1,0 +1,14 @@
+apiVersion: v1
+kind: Pod
+metadata:
+  name: resource-hog
+spec:
+  containers:
+    - name: resource-hog
+      image: busybox:latest
+      command: ["sleep", "3600"]
+      resources:
+        requests:
+          cpu: "99"
+          memory: 16Mi
+  restartPolicy: Never

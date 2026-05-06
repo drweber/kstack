@@ -1,0 +1,14 @@
+id: events-warnings-mixed
+skill: events
+description: >
+  Verifies that /events ranks Warning events first and notes suppressed
+  Normal events. Plants two pods that generate distinct Warning reasons
+  (ImagePullBackOff and CrashLoopBackOff/BackOff) plus the usual chatty
+  Normal events (Pulled, Created, Started) from restart attempts.
+namespace: eval-events-warnings-mixed
+runs: 3
+pass_threshold: 2
+wait_seconds: 180
+claude_flags:
+  model: ""
+  allowed_tools: "Bash"

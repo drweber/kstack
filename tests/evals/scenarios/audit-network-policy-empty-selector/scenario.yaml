@@ -1,0 +1,12 @@
+id: audit-network-policy-empty-selector
+skill: audit-network
+description: >
+  Verifies that /audit-network flags a NetworkPolicy whose podSelector
+  matches no pods in the namespace — the API-only Workflow 1 check.
+namespace: eval-audit-network-policy-empty-selector
+runs: 3
+pass_threshold: 2
+wait_seconds: 30
+claude_flags:
+  model: ""
+  allowed_tools: "Bash"

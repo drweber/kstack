@@ -1,0 +1,6 @@
+# Verify /cluster-status detects and names the unschedulable pod.
+rubric:
+  must_mention:
+    - "pending"
+    - "resource-hog"
+  must_not_mention: []

@@ -1,0 +1,6 @@
+# Verify the agent ran Workflow 5. No operators are planted, so the
+# expected outcome is "no operators detected" or "not available".
+rubric:
+  must_mention:
+    - "perator"
+  must_not_mention: []

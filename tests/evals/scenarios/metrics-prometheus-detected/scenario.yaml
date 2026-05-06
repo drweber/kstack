@@ -1,0 +1,16 @@
+id: metrics-prometheus-detected
+skill: metrics
+description: >
+  Verifies that /metrics detects an in-cluster Prometheus Service and
+  routes the user's windowed query to it. Plants a Service named
+  "prometheus" exposing port 9090 in the scenario namespace; the
+  briefing's source-detection probe matches it. The user's prompt has
+  an explicit time window, so the agent should pick Prometheus over
+  metrics-server per the SKILL.md briefing rules.
+namespace: eval-metrics-prometheus-detected
+runs: 3
+pass_threshold: 2
+wait_seconds: 0
+claude_flags:
+  model: ""
+  allowed_tools: "Bash"

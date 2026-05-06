@@ -1,0 +1,6 @@
+# Verify /audit-network flags the Service with zero endpoints.
+rubric:
+  must_mention:
+    - "dangling-svc"
+    - "endpoint"
+  must_not_mention: []

@@ -1,0 +1,9 @@
+# Verify the agent ran Workflow 6. The K8s CVE feed always runs (curl + jq);
+# trivy may or may not be present. "CVE" appears either as "CVE-…" IDs, the
+# section header, or "no known CVEs"; "Kubernetes" is in the cluster info
+# the agent restates from Workflow 1.
+rubric:
+  must_mention:
+    - "CVE"
+    - "Kubernetes"
+  must_not_mention: []

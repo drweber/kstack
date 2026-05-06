@@ -1,0 +1,828 @@
+# example-cluster.yaml
+#
+# Simulates a cluster with a mix of healthy workloads and widespread failures
+# across common failure categories:
+#   - Healthy workloads (loggen-ansi log generator)
+#   - Pod failures (crash loops, OOM, image pull errors, scheduling failures)
+#   - Workload failures (stuck rollouts, failed jobs, broken StatefulSets)
+#   - Configuration errors (missing ConfigMaps, Secrets, PVCs)
+#   - Networking problems (services with no endpoints)
+#   - Autoscaling misconfigurations (orphaned HPA, impossible PDB)
+#
+# Apply with:
+#   kubectl apply -f hack/example-cluster.yaml
+#
+# Clean up with:
+#   kubectl delete -f hack/example-cluster.yaml
+#   kubectl delete namespace broken overloaded
+
+# =============================================================================
+# Namespaces
+# =============================================================================
+
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: broken
+  labels:
+    kstack.kubetail.com/fixture: broken-cluster
+
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: overloaded
+  labels:
+    kstack.kubetail.com/fixture: broken-cluster
+
+# =============================================================================
+# Pod failures — broken namespace
+# =============================================================================
+
+# CrashLoopBackOff: container exits non-zero immediately; Kubernetes backs off
+# the restart exponentially. Events show BackOff. Last log: "starting..."
+---
+apiVersion: v1
+kind: Pod
+metadata:
+  name: crashloop
+  namespace: broken
+  labels:
+    app: crashloop
+    failure: crash-loop-backoff
+spec:
+  containers:
+    - name: app
+      image: busybox:latest
+      command: ["sh", "-c", "echo 'starting...' && sleep 1 && exit 1"]
+      resources:
+        requests:
+          cpu: 10m
+          memory: 16Mi
+  restartPolicy: Always
+
+---
+# OOMKilled: container is killed by the kernel because it exceeds its memory
+# limit. Status shows OOMKilled=true. Will restart into CrashLoopBackOff.
+apiVersion: v1
+kind: Pod
+metadata:
+  name: oom-killed
+  namespace: broken
+  labels:
+    app: oom-killed
+    failure: oom-killed
+spec:
+  containers:
+    - name: mem-hog
+      image: busybox:latest
+      command:
+        - sh
+        - -c
+        - |
+          echo "allocating memory..."
+          # fill memory by writing to a string in a tight loop
+          while true; do
+            x="$x$(head -c 1024 /dev/urandom | tr -dc 'a' 2>/dev/null)"
+          done
+      resources:
+        requests:
+          cpu: 10m
+          memory: 16Mi
+        limits:
+          memory: 20Mi
+  restartPolicy: Always
+
+---
+# ImagePullBackOff: image does not exist in any registry. Events show
+# ErrImagePull then ImagePullBackOff. Pod stays in Waiting state.
+apiVersion: v1
+kind: Pod
+metadata:
+  name: bad-image
+  namespace: broken
+  labels:
+    app: bad-image
+    failure: image-pull-backoff
+spec:
+  containers:
+    - name: app
+      image: registry.example.com/nonexistent/app:v99.99.99
+      resources:
+        requests:
+          cpu: 10m
+          memory: 16Mi
+  restartPolicy: Always
+
+---
+# Unschedulable: requests more CPU and memory than any node in the cluster can
+# provide. Pod stays Pending with event "Insufficient cpu" / "Insufficient
+# memory" from the scheduler.
+apiVersion: v1
+kind: Pod
+metadata:
+  name: unschedulable
+  namespace: broken
+  labels:
+    app: unschedulable
+    failure: insufficient-resources
+spec:
+  containers:
+    - name: resource-hog
+      image: busybox:latest
+      command: ["sleep", "infinity"]
+      resources:
+        requests:
+          cpu: "999"
+          memory: "9999Gi"
+  restartPolicy: Never
+
+---
+# NodeSelectorMismatch: nodeSelector names a node that does not exist. Pod
+# stays Pending with event "0/N nodes are available: N node(s) didn't match
+# node selector."
+apiVersion: v1
+kind: Pod
+metadata:
+  name: node-selector-mismatch
+  namespace: broken
+  labels:
+    app: node-selector-mismatch
+    failure: unschedulable-node-selector
+spec:
+  nodeSelector:
+    kubernetes.io/hostname: "worker-node-that-does-not-exist"
+  containers:
+    - name: app
+      image: busybox:latest
+      command: ["sleep", "infinity"]
+      resources:
+        requests:
+          cpu: 10m
+          memory: 16Mi
+  restartPolicy: Never
+
+---
+# Init container crash: init container exits non-zero so the main container
+# never starts. Status shows Init:CrashLoopBackOff.
+apiVersion: v1
+kind: Pod
+metadata:
+  name: init-failing
+  namespace: broken
+  labels:
+    app: init-failing
+    failure: init-crash-loop-backoff
+spec:
+  initContainers:
+    - name: preflight-check
+      image: busybox:latest
+      command: ["sh", "-c", "echo 'dependency check failed' >&2 && exit 1"]
+      resources:
+        requests:
+          cpu: 10m
+          memory: 16Mi
+  containers:
+    - name: app
+      image: busybox:latest
+      command: ["sleep", "infinity"]
+      resources:
+        requests:
+          cpu: 10m
+          memory: 16Mi
+  restartPolicy: Always
+
+---
+# Liveness probe killing pod: the liveness probe always fails so kubelet
+# restarts the container repeatedly. Eventually enters CrashLoopBackOff.
+apiVersion: v1
+kind: Pod
+metadata:
+  name: liveness-failing
+  namespace: broken
+  labels:
+    app: liveness-failing
+    failure: liveness-probe-failure
+spec:
+  containers:
+    - name: app
+      image: busybox:latest
+      command: ["sleep", "infinity"]
+      livenessProbe:
+        exec:
+          command: ["sh", "-c", "exit 1"]
+        initialDelaySeconds: 5
+        periodSeconds: 5
+        failureThreshold: 3
+      resources:
+        requests:
+          cpu: 10m
+          memory: 16Mi
+  restartPolicy: Always
+
+---
+# Readiness probe failing: pod runs but is never marked Ready so it receives
+# no traffic. Stays in Running state but 0/1 Ready. Deployment replicas show
+# 0 available.
+apiVersion: v1
+kind: Pod
+metadata:
+  name: readiness-failing
+  namespace: broken
+  labels:
+    app: readiness-failing
+    failure: readiness-probe-failure
+spec:
+  containers:
+    - name: app
+      image: busybox:latest
+      command: ["sleep", "infinity"]
+      readinessProbe:
+        exec:
+          command: ["sh", "-c", "exit 1"]
+        initialDelaySeconds: 5
+        periodSeconds: 5
+      resources:
+        requests:
+          cpu: 10m
+          memory: 16Mi
+  restartPolicy: Always
+
+---
+# Missing ConfigMap: pod is stuck in Pending/ContainerCreating because the
+# referenced ConfigMap does not exist. Event: "configmap not found".
+apiVersion: v1
+kind: Pod
+metadata:
+  name: missing-configmap
+  namespace: broken
+  labels:
+    app: missing-configmap
+    failure: missing-configmap
+spec:
+  containers:
+    - name: app
+      image: busybox:latest
+      command: ["sleep", "infinity"]
+      envFrom:
+        - configMapRef:
+            name: app-config-does-not-exist
+      resources:
+        requests:
+          cpu: 10m
+          memory: 16Mi
+  restartPolicy: Never
+
+---
+# Missing Secret: same pattern as missing ConfigMap but for a Secret.
+# Event: "secret not found".
+apiVersion: v1
+kind: Pod
+metadata:
+  name: missing-secret
+  namespace: broken
+  labels:
+    app: missing-secret
+    failure: missing-secret
+spec:
+  containers:
+    - name: app
+      image: busybox:latest
+      command: ["sleep", "infinity"]
+      envFrom:
+        - secretRef:
+            name: app-credentials-do-not-exist
+      resources:
+        requests:
+          cpu: 10m
+          memory: 16Mi
+  restartPolicy: Never
+
+---
+# Missing PVC: pod stays Pending because the PVC it mounts does not exist.
+# Event: "persistentvolumeclaim not found".
+apiVersion: v1
+kind: Pod
+metadata:
+  name: missing-pvc
+  namespace: broken
+  labels:
+    app: missing-pvc
+    failure: missing-pvc
+spec:
+  containers:
+    - name: app
+      image: busybox:latest
+      command: ["sleep", "infinity"]
+      volumeMounts:
+        - name: data
+          mountPath: /data
+      resources:
+        requests:
+          cpu: 10m
+          memory: 16Mi
+  volumes:
+    - name: data
+      persistentVolumeClaim:
+        claimName: database-pvc-does-not-exist
+  restartPolicy: Never
+
+---
+# Sidecar crash: the main container runs fine but the sidecar crashes
+# continuously. Pod shows 1/2 containers Ready; sidecar in CrashLoopBackOff.
+apiVersion: v1
+kind: Pod
+metadata:
+  name: sidecar-crashloop
+  namespace: broken
+  labels:
+    app: sidecar-crashloop
+    failure: sidecar-crash-loop-backoff
+spec:
+  containers:
+    - name: main
+      image: busybox:latest
+      command: ["sleep", "infinity"]
+      resources:
+        requests:
+          cpu: 10m
+          memory: 16Mi
+    - name: log-shipper
+      image: busybox:latest
+      command: ["sh", "-c", "echo 'cannot connect to log aggregator' >&2 && exit 1"]
+      resources:
+        requests:
+          cpu: 10m
+          memory: 16Mi
+  restartPolicy: Always
+
+---
+# Bad entrypoint: the executable does not exist in the container image.
+# Container exits immediately with "exec: no such file or directory".
+apiVersion: v1
+kind: Pod
+metadata:
+  name: bad-entrypoint
+  namespace: broken
+  labels:
+    app: bad-entrypoint
+    failure: crash-loop-backoff
+spec:
+  containers:
+    - name: app
+      image: busybox:latest
+      command: ["/usr/local/bin/nonexistent-binary", "--config=/etc/app/config.yaml"]
+      resources:
+        requests:
+          cpu: 10m
+          memory: 16Mi
+  restartPolicy: Always
+
+# =============================================================================
+# Workload failures — broken namespace
+# =============================================================================
+
+---
+# Deployment: all pods fail to pull the image. 0/3 replicas available.
+# Events on each pod: ErrImagePull then ImagePullBackOff.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: api-server
+  namespace: broken
+  labels:
+    app: api-server
+    failure: image-pull-backoff
+spec:
+  replicas: 3
+  selector:
+    matchLabels:
+      app: api-server
+  template:
+    metadata:
+      labels:
+        app: api-server
+        failure: image-pull-backoff
+    spec:
+      containers:
+        - name: api
+          image: registry.example.com/myorg/api-server:v2.1.0-broken
+          ports:
+            - containerPort: 8080
+          resources:
+            requests:
+              cpu: 50m
+              memory: 64Mi
+
+---
+# Deployment: stuck mid-rollout. Old ReplicaSet (nginx:1.25) is healthy; new
+# ReplicaSet (nginx:999.999.999 — bad image) can't pull. maxUnavailable=1 so
+# rollout blocks rather than scaling down old pods. 3/4 replicas available.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: frontend
+  namespace: broken
+  labels:
+    app: frontend
+    failure: stuck-rollout
+  annotations:
+    kubernetes.io/change-cause: "update to v3.0.0"
+spec:
+  replicas: 4
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxUnavailable: 1
+      maxSurge: 1
+  selector:
+    matchLabels:
+      app: frontend
+  template:
+    metadata:
+      labels:
+        app: frontend
+        failure: stuck-rollout
+    spec:
+      containers:
+        - name: web
+          image: nginx:999.999.999
+          ports:
+            - containerPort: 80
+          resources:
+            requests:
+              cpu: 10m
+              memory: 32Mi
+
+---
+# Deployment: all pods run but none ever become Ready because the readiness
+# probe targets a port that doesn't exist on the container. 0/2 available;
+# the Service backed by this deployment has no endpoints.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: checkout
+  namespace: broken
+  labels:
+    app: checkout
+    failure: readiness-probe-failure
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: checkout
+  template:
+    metadata:
+      labels:
+        app: checkout
+        failure: readiness-probe-failure
+    spec:
+      containers:
+        - name: checkout
+          image: busybox:latest
+          command: ["sleep", "infinity"]
+          readinessProbe:
+            tcpSocket:
+              port: 9999
+            initialDelaySeconds: 5
+            periodSeconds: 5
+          resources:
+            requests:
+              cpu: 10m
+              memory: 32Mi
+
+---
+# Deployment: all pods crash on startup because the required Secret is absent.
+# 0/2 replicas available. Pods stuck in ContainerCreating or Error.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: worker
+  namespace: broken
+  labels:
+    app: worker
+    failure: missing-secret
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: worker
+  template:
+    metadata:
+      labels:
+        app: worker
+        failure: missing-secret
+    spec:
+      containers:
+        - name: worker
+          image: busybox:latest
+          command: ["sleep", "infinity"]
+          envFrom:
+            - secretRef:
+                name: worker-credentials-do-not-exist
+          resources:
+            requests:
+              cpu: 10m
+              memory: 32Mi
+
+---
+# StatefulSet: Pods stuck Pending because the volumeClaimTemplate references
+# a StorageClass ("fast-nvme") that does not exist in the cluster. PVCs are
+# created but stay in Pending state — no volume provisioner handles them.
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: database
+  namespace: broken
+  labels:
+    app: database
+    failure: unbound-pvc
+spec:
+  serviceName: database
+  replicas: 3
+  selector:
+    matchLabels:
+      app: database
+  template:
+    metadata:
+      labels:
+        app: database
+        failure: unbound-pvc
+    spec:
+      containers:
+        - name: postgres
+          image: postgres:16
+          env:
+            - name: POSTGRES_PASSWORD
+              value: "hunter2"
+          volumeMounts:
+            - name: data
+              mountPath: /var/lib/postgresql/data
+          resources:
+            requests:
+              cpu: 100m
+              memory: 128Mi
+  volumeClaimTemplates:
+    - metadata:
+        name: data
+      spec:
+        accessModes: ["ReadWriteOnce"]
+        storageClassName: fast-nvme
+        resources:
+          requests:
+            storage: 20Gi
+
+---
+# Job: backoffLimit exceeded. All 3 attempts failed. Job shows FAILED.
+# The failed pods remain queryable; logs show the error message.
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: db-migration
+  namespace: broken
+  labels:
+    app: db-migration
+    failure: job-failed
+spec:
+  backoffLimit: 2
+  template:
+    metadata:
+      labels:
+        app: db-migration
+        failure: job-failed
+    spec:
+      containers:
+        - name: migrate
+          image: busybox:latest
+          command:
+            - sh
+            - -c
+            - |
+              echo "connecting to postgres://database:5432/app ..."
+              sleep 2
+              echo "ERROR: connection refused — is the database up?" >&2
+              exit 1
+          resources:
+            requests:
+              cpu: 10m
+              memory: 32Mi
+      restartPolicy: Never
+
+---
+# CronJob: fires every minute; each run fails immediately. The most recent
+# N failed Jobs accumulate (failedJobsHistoryLimit=3). Schedule is intentionally
+# frequent to generate a stream of failure events for the cluster.
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: report-generator
+  namespace: broken
+  labels:
+    app: report-generator
+    failure: cronjob-failing
+spec:
+  schedule: "*/1 * * * *"
+  failedJobsHistoryLimit: 3
+  successfulJobsHistoryLimit: 0
+  jobTemplate:
+    spec:
+      backoffLimit: 0
+      template:
+        metadata:
+          labels:
+            app: report-generator
+            failure: cronjob-failing
+        spec:
+          containers:
+            - name: generate
+              image: busybox:latest
+              command:
+                - sh
+                - -c
+                - |
+                  echo "fetching report data..."
+                  sleep 3
+                  echo "FATAL: upstream API returned 503" >&2
+                  exit 1
+              resources:
+                requests:
+                  cpu: 10m
+                  memory: 16Mi
+          restartPolicy: Never
+
+# =============================================================================
+# Networking failures — broken namespace
+# =============================================================================
+
+---
+# Service with no endpoints: the selector (app=ghost) matches zero pods.
+# Requests to this Service are always dropped. kubectl describe shows
+# Endpoints: <none>.
+apiVersion: v1
+kind: Service
+metadata:
+  name: ghost-service
+  namespace: broken
+  labels:
+    failure: no-endpoints
+spec:
+  selector:
+    app: ghost-app-does-not-exist
+  ports:
+    - name: http
+      port: 80
+      targetPort: 8080
+
+---
+# Service for the checkout deployment: because checkout pods never become
+# Ready (readiness probe fails), this Service also has no healthy endpoints.
+apiVersion: v1
+kind: Service
+metadata:
+  name: checkout
+  namespace: broken
+  labels:
+    app: checkout
+    failure: no-ready-endpoints
+spec:
+  selector:
+    app: checkout
+  ports:
+    - name: http
+      port: 80
+      targetPort: 8080
+
+---
+# Service for api-server: same pattern — all backing pods are in
+# ImagePullBackOff so there are no Ready endpoints.
+apiVersion: v1
+kind: Service
+metadata:
+  name: api-server
+  namespace: broken
+  labels:
+    app: api-server
+    failure: no-ready-endpoints
+spec:
+  selector:
+    app: api-server
+  ports:
+    - name: http
+      port: 8080
+      targetPort: 8080
+
+# =============================================================================
+# Autoscaling / policy misconfigurations — broken namespace
+# =============================================================================
+
+---
+# HPA pointing at a Deployment that doesn't exist. HPA shows
+# "unable to find object referenced by scaleTargetRef" in Events.
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: ghost-hpa
+  namespace: broken
+  labels:
+    failure: orphaned-hpa
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: ghost-app-does-not-exist
+  minReplicas: 2
+  maxReplicas: 20
+  metrics:
+    - type: Resource
+      resource:
+        name: cpu
+        target:
+          type: Utilization
+          averageUtilization: 60
+
+---
+# PodDisruptionBudget that makes the crashloop pod impossible to evict:
+# minAvailable=100% means zero disruptions are allowed even during node drain.
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: crashloop-pdb
+  namespace: broken
+  labels:
+    failure: impossible-pdb
+spec:
+  minAvailable: "100%"
+  selector:
+    matchLabels:
+      app: crashloop
+
+# =============================================================================
+# Resource pressure — overloaded namespace
+#
+# A Deployment requesting more total resources than the cluster can schedule.
+# Most replica pods end up Pending; a handful may be Running on small nodes.
+# Generates sustained "Insufficient cpu" scheduler events.
+# =============================================================================
+
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: resource-hog
+  namespace: overloaded
+  labels:
+    app: resource-hog
+    failure: overprovisioned
+spec:
+  replicas: 50
+  selector:
+    matchLabels:
+      app: resource-hog
+  template:
+    metadata:
+      labels:
+        app: resource-hog
+        failure: overprovisioned
+    spec:
+      containers:
+        - name: hog
+          image: busybox:latest
+          command: ["sleep", "infinity"]
+          resources:
+            requests:
+              cpu: "2"
+              memory: "4Gi"
+            limits:
+              cpu: "4"
+              memory: "8Gi"
+
+# =============================================================================
+# Healthy workloads
+# =============================================================================
+
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: loggen-ansi
+  namespace: default
+  labels:
+    app.kubernetes.io/name: loggen-ansi
+    kstack.kubetail.com/fixture: example-cluster
+spec:
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: loggen-ansi
+  replicas: 3
+  revisionHistoryLimit: 10
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: loggen-ansi
+        app.kubernetes.io/version: "0.1.2"
+    spec:
+      containers:
+        - name: loggen
+          image: docker.io/kubetail/loggen:0.1.2
+          args: ["-ansi"]
+          resources: {}

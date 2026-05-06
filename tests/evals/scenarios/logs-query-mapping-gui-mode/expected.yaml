@@ -1,0 +1,38 @@
+rubric:
+  must_mention:
+    # A console deep-link was produced.
+    - "localhost:7500/console?"
+    # Namespace appears inside a source= param (not as a standalone namespace= param).
+    # Matches both literal-colon and percent-encoded (%3A) forms.
+    - "source=eval-logs-gui"
+  must_not_mention: []
+  judge_criteria: |
+    Find the console URL Claude produced (look for `localhost:7500/console?`).
+    If multiple URLs appear, grade the one on the `URL:` line; fall back to
+    the last occurrence. Ignore the human-readable "Suggested filter" line —
+    it may legitimately use `namespace=<ns>` shorthand.
+
+    Colons in source values may be literal (`:`) or percent-encoded (`%3A`);
+    treat them as equivalent throughout.
+
+    PASS only if ALL of the following hold:
+
+      1. The URL contains `source=eval-logs-gui:<workload>` (or its
+         percent-encoded equivalent `source=eval-logs-gui%3A<workload>`).
+         The workload segment should resolve to `deployments/api` or a
+         specific pod name from that deployment.
+
+      2. The URL does NOT contain a standalone `namespace=` param —
+         namespace belongs inside the source value, not as its own param.
+
+      3. The URL does NOT contain `since=`, `until=`, or `last=` params —
+         the console does not accept relative time windows. "Last 15
+         minutes" must be encoded as `mode=cursor&cursor=<RFC3339>` or
+         omitted (with the window noted in chat instead).
+
+      4. The URL contains `grep=error` (or `grep=error` percent-encoded).
+
+      5. The URL contains `kubeContext=kind-kstack-test`.
+
+    Fail on violations of (1)–(4). Treat (5) as a soft check: note it in
+    `violations` but do not fail solely on (5).

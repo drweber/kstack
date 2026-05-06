@@ -1,0 +1,7 @@
+# Verify /cluster-status detects and names the image-pull failure.
+# "ImagePull" matches both ErrImagePull and ImagePullBackOff.
+rubric:
+  must_mention:
+    - "ImagePull"
+    - "bad-puller"
+  must_not_mention: []

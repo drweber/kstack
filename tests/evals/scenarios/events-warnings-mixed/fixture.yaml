@@ -1,0 +1,28 @@
+apiVersion: v1
+kind: Pod
+metadata:
+  name: bad-puller
+spec:
+  containers:
+    - name: bad-puller
+      image: this-image-does-not-exist.invalid/nope:nope
+      resources:
+        requests:
+          cpu: 10m
+          memory: 16Mi
+  restartPolicy: Always
+---
+apiVersion: v1
+kind: Pod
+metadata:
+  name: crasher
+spec:
+  containers:
+    - name: crasher
+      image: busybox:latest
+      command: ["sh", "-c", "exit 1"]
+      resources:
+        requests:
+          cpu: 10m
+          memory: 16Mi
+  restartPolicy: Always

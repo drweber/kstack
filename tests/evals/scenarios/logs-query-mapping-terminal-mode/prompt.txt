@@ -1,0 +1,1 @@
+Tail logs from the `api` deployment in the `eval-logs-terminal` namespace. Show the last 15 minutes and filter for "error". Pass `--detach`.

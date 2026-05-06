@@ -1,0 +1,14 @@
+id: audit-outdated-version-skew
+skill: audit-outdated
+description: >
+  Verifies that /audit-outdated emits the Version Skew block from
+  scripts/main — Workflow 1. wait.sh pre-seeds the deprecated-APIs
+  backend to "skip" so the run doesn't enter the needs_setup prompt
+  flow; teardown.sh removes the preference.
+namespace: eval-audit-outdated-version-skew
+runs: 3
+pass_threshold: 2
+wait_seconds: 30
+claude_flags:
+  model: ""
+  allowed_tools: "Bash"

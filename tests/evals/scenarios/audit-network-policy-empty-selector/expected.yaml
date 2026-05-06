@@ -1,0 +1,6 @@
+# Verify /audit-network flags the NetworkPolicy whose podSelector matches no pods.
+rubric:
+  must_mention:
+    - "orphan-policy"
+    - "selector"
+  must_not_mention: []

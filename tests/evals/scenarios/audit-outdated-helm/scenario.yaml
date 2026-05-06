@@ -1,0 +1,15 @@
+id: audit-outdated-helm
+skill: audit-outdated
+description: >
+  Verifies that /audit-outdated runs Workflow 4 (Helm charts) and
+  reports the workflow's outcome — either chart findings (when helm is
+  installed and has releases) or "not available" (when helm is not on
+  PATH). The MVP rubric just confirms the workflow ran; "available" as
+  substring matches both branches.
+namespace: eval-audit-outdated-helm
+runs: 3
+pass_threshold: 2
+wait_seconds: 30
+claude_flags:
+  model: ""
+  allowed_tools: "Bash"

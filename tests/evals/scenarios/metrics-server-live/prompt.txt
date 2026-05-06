@@ -1,0 +1,1 @@
+Run /metrics current cpu and memory for pod cpu-burner in eval-metrics-server-live

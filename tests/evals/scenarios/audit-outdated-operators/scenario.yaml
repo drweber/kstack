@@ -1,0 +1,15 @@
+id: audit-outdated-operators
+skill: audit-outdated
+description: >
+  Verifies that /audit-outdated runs Workflow 5 (Operators, CRDs and
+  controllers). The eval namespace has no operators planted, so the
+  expected outcome is the agent reporting "no operators detected" or
+  the workflow's "not available" branch when helm/registry data is
+  missing. MVP rubric just confirms the workflow ran.
+namespace: eval-audit-outdated-operators
+runs: 3
+pass_threshold: 2
+wait_seconds: 30
+claude_flags:
+  model: ""
+  allowed_tools: "Bash"

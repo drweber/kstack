@@ -1,0 +1,7 @@
+# Verify the agent ran Workflow 2 via the kubernetes.io deprecation guide
+# and reported the no-findings outcome on a clean kind cluster.
+rubric:
+  must_mention:
+    - "Deprecated APIs"
+    - "kubernetes.io"
+  must_not_mention: []

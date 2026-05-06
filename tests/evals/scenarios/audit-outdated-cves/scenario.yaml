@@ -1,0 +1,15 @@
+id: audit-outdated-cves
+skill: audit-outdated
+description: >
+  Verifies that /audit-outdated runs Workflow 6 (Known vulnerabilities)
+  against the official Kubernetes CVE feed. Trivy may or may not be
+  installed on the test host; the K8s CVE feed path uses curl + jq and
+  should always run. Rubric just confirms the workflow ran and surfaced
+  CVE-related output.
+namespace: eval-audit-outdated-cves
+runs: 3
+pass_threshold: 2
+wait_seconds: 30
+claude_flags:
+  model: ""
+  allowed_tools: "Bash"

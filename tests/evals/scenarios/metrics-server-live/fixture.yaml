@@ -1,0 +1,23 @@
+# A small workload that does a measurable amount of CPU work so
+# metrics-server has something non-zero to report. `yes` pegs one CPU,
+# but we cap with a low CPU limit so it shows up as a clear number
+# without starving the kind node.
+apiVersion: v1
+kind: Pod
+metadata:
+  name: cpu-burner
+  labels:
+    app: cpu-burner
+spec:
+  containers:
+    - name: burner
+      image: busybox:latest
+      command: ["sh", "-c", "yes > /dev/null"]
+      resources:
+        requests:
+          cpu: 50m
+          memory: 16Mi
+        limits:
+          cpu: 100m
+          memory: 32Mi
+  restartPolicy: Always

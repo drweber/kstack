@@ -1,0 +1,9 @@
+# Verify the agent ran Workflow 7 (Node OS & kernel). Kind nodes ship a
+# Linux base (currently Debian, possibly different in future kind
+# images), and the agent reads kernelVersion from nodes.json. Match
+# distro-agnostic tokens that any W7 output contains.
+rubric:
+  must_mention:
+    - "Linux"
+    - "kernel"
+  must_not_mention: []

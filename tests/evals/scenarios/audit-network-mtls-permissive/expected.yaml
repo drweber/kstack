@@ -1,0 +1,6 @@
+# Verify /audit-network flags the permissive PeerAuthentication policy.
+rubric:
+  must_mention:
+    - "leaky-default"
+    - "PERMISSIVE"
+  must_not_mention: []

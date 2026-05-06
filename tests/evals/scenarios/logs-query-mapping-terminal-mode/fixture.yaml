@@ -1,0 +1,43 @@
+# Deployment so kubectl step 2 (workload-existence check) finds a real target.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: api
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: api
+  template:
+    metadata:
+      labels:
+        app: api
+    spec:
+      containers:
+        - name: api
+          image: busybox:latest
+          command: ["sh", "-c", "while true; do echo 'api heartbeat'; sleep 60; done"]
+          resources:
+            requests:
+              cpu: 10m
+              memory: 16Mi
+---
+# Mock Kubetail API pod so step 5 (API presence check) passes and the
+# workflow reaches the Command: print at step 4. The pod does nothing —
+# only its label matters for the `kubectl get pods -l
+# app.kubernetes.io/name=kubetail --all-namespaces` probe.
+apiVersion: v1
+kind: Pod
+metadata:
+  name: kubetail-api-mock
+  labels:
+    app.kubernetes.io/name: kubetail
+spec:
+  containers:
+    - name: mock
+      image: busybox:latest
+      command: ["sh", "-c", "while true; do sleep 3600; done"]
+      resources:
+        requests:
+          cpu: 5m
+          memory: 8Mi

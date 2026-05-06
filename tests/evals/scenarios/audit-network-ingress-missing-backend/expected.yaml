@@ -1,0 +1,6 @@
+# Verify /audit-network flags the Ingress backend pointing at a missing Service.
+rubric:
+  must_mention:
+    - "ghost-ingress"
+    - "nonexistent-svc"
+  must_not_mention: []

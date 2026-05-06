@@ -1,0 +1,9 @@
+# Verify /audit-outdated flags the stale-nginx pod's outdated image tag.
+# nginx 1.20 is several major releases behind the latest stable line on
+# Docker Hub.
+rubric:
+  must_mention:
+    - "stale-nginx"
+    - "nginx"
+    - "1.20"
+  must_not_mention: []

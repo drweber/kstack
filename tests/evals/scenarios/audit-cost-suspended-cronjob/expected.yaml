@@ -1,0 +1,6 @@
+# Verify /audit-cost flags the suspended CronJob.
+rubric:
+  must_mention:
+    - "forgotten-cron"
+    - "suspend"
+  must_not_mention: []

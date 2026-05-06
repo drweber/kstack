@@ -1,0 +1,1 @@
+Run /audit-outdated images and report findings.

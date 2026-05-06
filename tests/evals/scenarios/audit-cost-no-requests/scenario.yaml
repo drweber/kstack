@@ -1,0 +1,13 @@
+id: audit-cost-no-requests
+skill: audit-cost
+description: >
+  Verifies that /audit-cost flags a container with no resources.requests
+  set — the API-only Workflow 1 check that doesn't depend on
+  metrics-server or Prometheus being available.
+namespace: eval-audit-cost-no-requests
+runs: 3
+pass_threshold: 2
+wait_seconds: 30
+claude_flags:
+  model: ""
+  allowed_tools: "Bash"

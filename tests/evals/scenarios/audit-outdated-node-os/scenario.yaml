@@ -1,0 +1,14 @@
+id: audit-outdated-node-os
+skill: audit-outdated
+description: >
+  Verifies that /audit-outdated runs Workflow 7 (Node OS & kernel).
+  Kind nodes ship a known Ubuntu base; the agent reads
+  status.nodeInfo.osImage / kernelVersion from nodes.json and surfaces
+  it. Rubric checks that the workflow ran and named the node OS.
+namespace: eval-audit-outdated-node-os
+runs: 3
+pass_threshold: 2
+wait_seconds: 30
+claude_flags:
+  model: ""
+  allowed_tools: "Bash"

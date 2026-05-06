@@ -1,0 +1,14 @@
+id: investigate-crashloop
+skill: investigate
+description: >
+  Verifies that /investigate diagnoses a CrashLoopBackOff pod by
+  fetching `--previous` container logs (since the current container is
+  always being restarted) and surfacing both the headline state and
+  the planted error message from the prior crash.
+namespace: eval-investigate-crashloop
+runs: 3
+pass_threshold: 2
+wait_seconds: 180
+claude_flags:
+  model: ""
+  allowed_tools: "Bash"

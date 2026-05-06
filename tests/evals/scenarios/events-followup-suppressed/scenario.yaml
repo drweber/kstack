@@ -1,0 +1,15 @@
+id: events-followup-suppressed
+skill: events
+description: >
+  Verifies the cached-snapshot drill-in contract: after /events collapses
+  chatty Normal events (Pulled, Created, Started) into a count, a follow-up
+  ask for the suppressed events should be answered from cache_dir/events.json
+  rather than re-running the skill or re-querying the API. Plants a healthy
+  pod whose name only surfaces if the agent actually reads the cache.
+namespace: eval-events-followup-suppressed
+runs: 3
+pass_threshold: 2
+wait_seconds: 60
+claude_flags:
+  model: ""
+  allowed_tools: "Bash"

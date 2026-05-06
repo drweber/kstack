@@ -1,0 +1,105 @@
+---
+name: {{SKILL_NAME}}
+description: Root-cause analysis across events, logs, and related resources
+---
+
+{{ENTRYPOINT}}
+
+{{GLOBAL_FLAGS}}
+
+{{PREAMBLE}}
+
+## Purpose
+
+Kick off a root-cause investigation on a failing or suspicious resource. The skill gathers an initial bundle of facts up-front so follow-up turns can stay tight, then briefs you on how to read the bundle and when to re-fetch vs. reach for a neighboring skill. Read-only — Kubernetes API only.
+
+## Arguments
+
+Optional natural-language target. Examples:
+
+- `/investigate` — no target; ask the user what they want to investigate.
+- `/investigate pod/checkout-7c9` — explicit `<kind>/<name>`.
+- `/investigate the api deployment` — natural-language target.
+- `/investigate why is checkout crashing` — natural-language target plus intent hint.
+
+If the target is omitted and you can't infer one from recent context (e.g. a previous `/cluster-status` or `/events` envelope that named a problem pod), prompt the user with one short question and stop.
+
+**No skill-specific flags. Options: none.** Scope logs, time windows, label selectors, etc. via natural language in the prompt or follow-ups.
+
+## Initial bundle
+
+The bundle is gathered in **two rounds** — the second round can't start until the first resolves the target's referenced names.
+
+**Round 1 — target spec + namespace events.** Fetch in parallel:
+
+- **Spec and status of the target resource**, plus any sibling/child resources that share its lifecycle. For a Pod that's a Deployment leaf, also fetch the Deployment + ReplicaSet; for a Job, fetch the CronJob owner if present:
+
+      kubectl get <kind>/<name> -n <ns> -o json --context=<pinned>
+
+- **Events for the whole namespace, filtered client-side by owner UIDs.** Walk `metadata.ownerReferences` upward (Pod → ReplicaSet → Deployment, Job → CronJob) to collect the chain's UIDs, then issue **one** namespace-wide events fetch and filter client-side — `kubectl --field-selector` doesn't support set membership, so per-owner queries would be N+1. Owner events often explain why the leaf resource is in the state it's in:
+
+      kubectl get events -n <ns> -o json --context=<pinned> \
+        | jq '[.items[] | select(.involvedObject.uid as $u | <chain-uids> | index($u))]'
+
+**Round 2 — referenced resources, batched.** From the target's spec, gather the referenced names and fetch them all in one consolidated `kubectl get` (kubectl accepts comma-separated `<kind>/<name>` tuples):
+
+    kubectl get \
+      svc/<backing-service> \
+      cm/<each-configmap-name> \
+      secret/<each-secret-name> \
+      pvc/<each-pvc-name> \
+      sa/<service-account-name> \
+      node/<scheduled-node>             \
+      -n <ns> -o json --context=<pinned>
+
+What you're collecting here:
+
+- the backing **`Service`** (matched by selector against the pod's labels)
+- mounted **`ConfigMap`** and **`Secret`** objects — **by name and namespace only; never read the contents**, not even to confirm a value isn't empty
+- bound **`PVC`s** referenced from `spec.volumes[*].persistentVolumeClaim`
+- the referenced **`ServiceAccount`** (`spec.serviceAccountName` and the implicit `default` SA when absent)
+- when the target is a Pod, the **node** it's scheduled on (cluster-scoped, ignores `-n`) — surface its **conditions** (Ready, MemoryPressure, DiskPressure, PIDPressure, NetworkUnavailable), **capacity**, and whether it's currently under pressure. A "perfectly healthy" workload often points back to a node problem.
+
+**Logs (Round 2, in parallel with the consolidated get).** Per container in the target Pod:
+
+- Fetch current logs, truncated to the lines most likely to contain the failure (typically the last ~200 lines, or the tail after a panic / fatal / Error / Traceback marker — whichever is more informative):
+
+      kubectl logs <pod> -c <container> --tail=200 --context=<pinned>
+
+- Fetch `--previous` **only** for containers whose `status.containerStatuses[*].lastState.terminated` is non-empty (or whose `restartCount > 0`). Skip the `--previous` call entirely otherwise — it's wasted on containers that have never restarted, and `kubectl logs --previous` errors out when there's no previous instance:
+
+      kubectl logs <pod> -c <container> --tail=200 --previous --context=<pinned>
+
+Truncate aggressively — the bundle is for orientation, not full forensics. The user can ask for more via `/logs`.
+
+**Source: Kubernetes API only.** No metrics-server, no Prometheus, no log scraping beyond `kubectl logs`. If the user wants resource usage over time or a live log tail, hand off to a neighboring skill (see Handoffs below).
+
+## How to read the bundle
+
+When briefing the user on findings, use these signals:
+
+- **Exit codes** on `lastState.terminated.exitCode`: `0` is clean, `1`/`2` are app errors, `137` is OOMKilled or external SIGKILL, `139` is segfault, `143` is graceful SIGTERM. The exit code plus the matching `reason` (`OOMKilled`, `Error`, `Completed`) is usually the headline.
+- **Event reasons** carry meaning: `BackOff`/`CrashLoopBackOff` (app exits or fails liveness), `FailedScheduling` (no fitting node), `FailedMount`/`FailedAttachVolume` (storage), `Unhealthy` (probe failure), `NetworkNotReady`/`FailedCreatePodSandBox` (CNI/runtime), `Evicted` (node pressure or preemption), `ImagePullBackOff`/`ErrImagePull` (registry).
+- **State combinations** that are diagnostic on their own: `Pending` + no node assigned → scheduler issue; `Running` + `Ready: False` → liveness probe failing; `Pending` + `ContainerCreating` for >2 minutes → image pull or volume mount; `CrashLoopBackOff` with no events on the pod → app-level crash, dig into logs.
+
+Cite the specific line of evidence inline (the event reason, the exit code, the timestamp) rather than just naming the conclusion.
+
+## Follow-ups
+
+The bundle ages quickly. **Don't reason from the stale bundle when the user asks something that depends on current state** — re-fetch the relevant slice with kubectl. Phrases like "is it still crashing", "did it recover", "what's it doing now" all call for a fresh look.
+
+When the user wants ongoing observation rather than a snapshot, start a **scoped event watch**:
+
+    kubectl get events -n <ns> --field-selector involvedObject.name=<name> \
+      --watch-only --context=<pinned> &
+
+Stop it when the user is done.
+
+## Handoffs
+
+Hand off to a neighboring skill when the question crosses out of the bundle's scope:
+
+- **`/logs <target>`** — for a live tail, broader log search, or grep across pods. The bundle's truncated log slice is for orientation; full log analysis lives in `/logs`.
+- **`/exec <target>`** — for an interactive shell into the container or node. Pick this when the user needs to inspect filesystem state, run app-specific tooling, or touch a config the API doesn't surface.
+- **`/metrics <target>`** — for resource usage over time (CPU/memory/network). The bundle has the current `requests`/`limits` and the most recent `lastState`, but no time series.
+- **`/audit-cost`** / **`/audit-security`** / **`/audit-network`** when the investigation reveals a class of issue (over-provisioned workload, RBAC drift, missing default-deny) that's worth a fleet-wide sweep rather than a one-off fix.

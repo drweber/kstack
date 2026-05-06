@@ -1,0 +1,137 @@
+#!/usr/bin/env bash
+
+# Copyright 2026 The Kubetail Authors
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+# kstack entrypoint — shared preamble invoked as the first tool call of every
+# rendered SKILL.md. Always exits 0 and writes exactly one response envelope
+# (schemas/response.schema.json) to stdout. The envelope and its agent-side
+# contract are defined in src/skills/_partials/entrypoint.md.
+
+set -u
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")" && pwd)"
+
+# shellcheck source=../lib/cache.sh
+. "$SCRIPT_DIR/../lib/cache.sh"
+# shellcheck source=../lib/manifest.sh
+. "$SCRIPT_DIR/../lib/manifest.sh"
+# shellcheck source=../lib/update-check.sh
+. "$SCRIPT_DIR/../lib/update-check.sh"
+# shellcheck source=../lib/response.sh
+. "$SCRIPT_DIR/../lib/response.sh"
+# shellcheck source=../lib/kube-context.sh
+. "$SCRIPT_DIR/../lib/kube-context.sh"
+
+# Fail-tolerant by design: any bug in the update check must stay invisible to
+# the calling skill. Subshell isolates `set -u` failures; stdout capture lifts
+# the notice into the caller.
+compute_notice() {
+  KSTACK_NOTICE="$(
+    (
+      uc_notice "$SCRIPT_DIR"
+      [ -n "${NOTICE:-}" ] && printf '%s' "$NOTICE"
+    ) 2>/dev/null || true
+  )"
+}
+
+has_help_flag() {
+  for a in "$@"; do
+    case "$a" in
+      --help|-h) return 0 ;;
+    esac
+  done
+  return 1
+}
+
+main() {
+  local skill_dir="" saw_sep=0
+  while [ $# -gt 0 ]; do
+    case "$1" in
+      --skill-dir=*)  skill_dir="${1#--skill-dir=}";  shift ;;
+      --) saw_sep=1; shift; break ;;
+      *)
+        response::infra_error "Unexpected flag before '--': $1. Reinstall kstack."
+        exit 0 ;;
+    esac
+  done
+
+  if [ -z "$skill_dir" ]; then
+    response::infra_error "--skill-dir is required. Reinstall kstack."
+    exit 0
+  fi
+  if [ "$saw_sep" -eq 0 ]; then
+    response::infra_error "Missing '--' separator before user args. Reinstall kstack."
+    exit 0
+  fi
+
+  local skill_name
+  skill_name="$(basename "$skill_dir")"
+
+  # --help short-circuits before the update check so the notice is not glued
+  # to the help page. No kube context is resolved either — help pages are
+  # cluster-agnostic and resolution would otherwise fail in environments
+  # without kubectl.
+  if has_help_flag "$@"; then
+    local docs_url_file="$skill_dir/references/docs-url.txt"
+    if [ ! -f "$docs_url_file" ]; then
+      response::infra_error "Docs URL missing for /$skill_name. Reinstall kstack."
+      exit 0
+    fi
+    local docs_url
+    docs_url="$(cat "$docs_url_file")"
+    if command -v open >/dev/null 2>&1; then
+      open "$docs_url" >/dev/null 2>&1 || true
+    elif command -v xdg-open >/dev/null 2>&1; then
+      xdg-open "$docs_url" >/dev/null 2>&1 || true
+    fi
+    response::ok_verbatim "Reference docs: $docs_url"
+    exit 0
+  fi
+
+  if ! kube_context::resolve "$@"; then
+    response::user_error "$KUBE_CONTEXT_ERROR"
+    exit 0
+  fi
+  export KSTACK_KUBE_CONTEXT
+  # Safe expansion: bash 3.2 (macOS default) errors on "${arr[@]}" for an
+  # empty array under set -u. The +alt form expands to nothing when unset.
+  set -- ${KUBE_CONTEXT_RESIDUAL_ARGS[@]+"${KUBE_CONTEXT_RESIDUAL_ARGS[@]}"}
+  unset KUBE_CONTEXT_RESIDUAL_ARGS KUBE_CONTEXT_ERROR KUBE_CONTEXT_ERROR_KIND
+
+  compute_notice
+  export KSTACK_NOTICE
+
+  local main_script="$skill_dir/scripts/main"
+  if [ -e "$main_script" ]; then
+    if [ ! -x "$main_script" ]; then
+      response::infra_error "Skill /$skill_name main script is not executable: $main_script. Reinstall kstack."
+      exit 0
+    fi
+    resolve_cache_paths "$SCRIPT_DIR"
+    export KSTACK_ROOT="$ROOT_DIR"
+    export KSTACK_SKILL_DIR="$skill_dir"
+    export KSTACK_SKILL_NAME="$skill_name"
+    exec "$main_script" "$@"
+  fi
+
+  # No scripts/main — emit a preamble-only envelope so the agent continues
+  # with the SKILL.md body (and surfaces any notice verbatim).
+  response::ok_agent ""
+  exit 0
+}
+
+if [ "${BASH_SOURCE[0]:-$0}" = "$0" ]; then
+  main "$@"
+fi

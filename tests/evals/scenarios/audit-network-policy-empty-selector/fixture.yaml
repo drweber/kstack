@@ -1,0 +1,10 @@
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: orphan-policy
+spec:
+  podSelector:
+    matchLabels:
+      app: does-not-exist
+  policyTypes:
+    - Ingress

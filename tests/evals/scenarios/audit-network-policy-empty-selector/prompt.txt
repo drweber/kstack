@@ -1,0 +1,1 @@
+Run /audit-network policies in eval-audit-network-policy-empty-selector and report findings.

@@ -1,0 +1,9 @@
+# Verify the agent ran Workflow 4 (Helm). The word "release" appears
+# in every realistic output branch — listing releases, "no Helm
+# releases installed", or "helm not installed; cannot enumerate
+# releases" when the binary is missing.
+rubric:
+  must_mention:
+    - "Helm"
+    - "release"
+  must_not_mention: []

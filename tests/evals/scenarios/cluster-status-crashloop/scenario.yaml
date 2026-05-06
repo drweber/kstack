@@ -1,0 +1,13 @@
+id: cluster-status-crashloop
+skill: cluster-status
+description: >
+  Verifies that /cluster-status detects and names a CrashLoopBackOff pod.
+  Plants a pod that exits immediately to trigger the crash loop, waits for
+  Kubernetes to enter backoff, then checks the output identifies the issue.
+namespace: eval-cluster-status-crashloop
+runs: 3
+pass_threshold: 2
+wait_seconds: 180
+claude_flags:
+  model: ""
+  allowed_tools: "Bash"

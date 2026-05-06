@@ -1,0 +1,12 @@
+id: audit-security-rbac-wildcard
+skill: audit-security
+description: >
+  Verifies that /audit-security flags a Role granting wildcard verbs on
+  wildcard resources, bound to a ServiceAccount via a RoleBinding.
+namespace: eval-audit-security-rbac-wildcard
+runs: 3
+pass_threshold: 2
+wait_seconds: 30
+claude_flags:
+  model: ""
+  allowed_tools: "Bash"

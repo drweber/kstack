@@ -1,0 +1,6 @@
+# Verify /cluster-status detects and names the crashing pod.
+rubric:
+  must_mention:
+    - "CrashLoopBackOff"
+    - "crasher"
+  must_not_mention: []

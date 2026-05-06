@@ -1,0 +1,8 @@
+# Verify /audit-outdated surfaces the Version Skew block with the cluster's
+# control-plane version.
+rubric:
+  must_mention:
+    - "Version Skew"
+    - "Control plane"
+    - "v1."
+  must_not_mention: []

@@ -1,0 +1,17 @@
+id: logs-query-mapping-gui-mode
+skill: logs
+description: >
+  Verifies that the skill correctly maps a natural-language log-browsing
+  request to a well-formed kubetail console deep-link URL. The fixture
+  plants an `api` deployment in a non-default namespace. The rubric checks
+  that the resolved URL uses the `source=<ns>:<kind>/<name>` param shape,
+  encodes "last 15 minutes" as an absolute cursor rather than a relative
+  time param, and carries `kubeContext` and `grep`. GUI mode is triggered
+  by "browse" phrasing in the prompt.
+namespace: eval-logs-gui
+runs: 3
+pass_threshold: 2
+wait_seconds: 60
+claude_flags:
+  model: ""
+  allowed_tools: "Bash,Read"

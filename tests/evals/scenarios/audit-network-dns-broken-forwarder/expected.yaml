@@ -1,0 +1,8 @@
+# Verify /audit-network flags the broken stub-domain forwarder in the
+# CoreDNS Corefile. The patched zone is "kstack-eval-broken.invalid"
+# pointing at 192.0.2.1.
+rubric:
+  must_mention:
+    - "kstack-eval-broken.invalid"
+    - "192.0.2.1"
+  must_not_mention: []

@@ -1,0 +1,16 @@
+id: metrics-server-live
+skill: metrics
+description: >
+  Verifies that /metrics queries metrics-server and reports current CPU /
+  memory for a planted pod. Kind ships without metrics-server, so wait.sh
+  installs it idempotently (with the kubelet-insecure-tls flag kind needs)
+  and blocks until `kubectl top` returns data for the planted pod.
+namespace: eval-metrics-server-live
+runs: 3
+pass_threshold: 2
+# metrics-server install + first scrape cycle takes ~30s on a warm cluster,
+# longer on a cold one.
+wait_seconds: 240
+claude_flags:
+  model: ""
+  allowed_tools: "Bash"

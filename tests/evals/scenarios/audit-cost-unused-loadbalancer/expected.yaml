@@ -1,0 +1,6 @@
+# Verify /audit-cost flags the LoadBalancer Service with no endpoints.
+rubric:
+  must_mention:
+    - "ghost-lb"
+    - "LoadBalancer"
+  must_not_mention: []

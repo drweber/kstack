@@ -1,0 +1,19 @@
+id: logs-query-mapping-terminal-mode
+skill: logs
+description: >
+  Verifies that the skill correctly maps a natural-language log-tailing
+  request to a well-formed `kubetail logs` invocation. The fixture plants
+  an `api` deployment and a mock Kubetail API pod (label:
+  app.kubernetes.io/name=kubetail) in a non-default namespace so the
+  workflow reaches the mandatory `Command:` print. The rubric checks that
+  the invocation uses the `<ns>:<kind>/<name>` source shape, carries the
+  right time-window and grep flags, and contains none of the kubectl-style
+  flags (`--namespace`, `-n`, `--selector`, etc.) that `kubetail logs`
+  does not accept.
+namespace: eval-logs-terminal
+runs: 3
+pass_threshold: 2
+wait_seconds: 60
+claude_flags:
+  model: ""
+  allowed_tools: "Bash,Read"

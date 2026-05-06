@@ -1,0 +1,11 @@
+# Verify /events ranks Warning events and flags Normal-event suppression.
+# "ImagePull" matches both ErrImagePull and ImagePullBackOff (the state
+# flips between the two as kubelet retries); "BackOff" also matches
+# CrashLoopBackOff for the crasher pod.
+rubric:
+  must_mention:
+    - "ImagePull"
+    - "crasher"
+    - "BackOff"
+    - "suppressed"
+  must_not_mention: []

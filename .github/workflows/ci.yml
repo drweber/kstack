@@ -1,0 +1,158 @@
+name: ci
+
+permissions:
+  contents: read
+
+on:
+  pull_request:
+    branches:
+      - "**"
+  workflow_dispatch:
+
+jobs:
+  lint:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Run shellcheck
+        run: ./scripts/lint.sh
+
+  bats:
+    strategy:
+      fail-fast: false
+      matrix:
+        os:
+          - linux
+          - macos-15
+          - macos-26
+          - windows
+        arch:
+          - amd64
+          - arm64
+        include:
+          - os: linux
+            arch: amd64
+            runner: ubuntu-24.04
+          - os: linux
+            arch: arm64
+            runner: ubuntu-24.04-arm
+          - os: macos-15
+            arch: amd64
+            runner: macos-15-intel
+          - os: macos-15
+            arch: arm64
+            runner: macos-15
+          - os: macos-26
+            arch: arm64
+            runner: macos-26
+          - os: windows
+            arch: amd64
+            runner: windows-2025
+          - os: windows
+            arch: arm64
+            runner: windows-11-arm
+        exclude:
+          - os: macos-26
+            arch: amd64
+    runs-on: ${{ matrix.runner }}
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Install bats-core + jq (Ubuntu)
+        if: runner.os == 'Linux'
+        run: sudo apt-get update && sudo apt-get install -y bats jq
+
+      - name: Install bats-core + jq (macOS)
+        if: runner.os == 'macOS'
+        run: brew install bats-core jq
+
+      - name: Install bats-core (Windows)
+        if: runner.os == 'Windows'
+        shell: bash
+        run: npm install -g bats
+
+      - name: Install jq (Windows)
+        if: runner.os == 'Windows'
+        shell: bash
+        run: choco install jq -y
+
+      - name: Configure git identity
+        run: |
+          git config --global user.email "ci@example.com"
+          git config --global user.name  "CI"
+
+      - name: Run test suite
+        shell: bash
+        run: ./scripts/test.sh
+
+  bats-e2e:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Install bats-core
+        run: sudo apt-get update && sudo apt-get install -y bats
+
+      - name: Install kind
+        run: |
+          curl -Lo /tmp/kind https://kind.sigs.k8s.io/dl/v0.24.0/kind-linux-amd64
+          sudo install -o root -g root -m 0755 /tmp/kind /usr/local/bin/kind
+          kind version
+
+      - name: Install kubectl
+        run: |
+          curl -Lo /tmp/kubectl "https://dl.k8s.io/release/$(curl -Ls https://dl.k8s.io/release/stable.txt)/bin/linux/amd64/kubectl"
+          sudo install -o root -g root -m 0755 /tmp/kubectl /usr/local/bin/kubectl
+          kubectl version --client
+
+      - name: Run e2e suite
+        run: ./scripts/test-e2e.sh
+
+  evals:
+    # Manual-only for now. Trigger with `gh workflow run ci.yml`. Graduates
+    # to PR label / nightly cron once we have real scenarios.
+    if: github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-24.04
+    concurrency:
+      group: evals-${{ github.ref }}
+      cancel-in-progress: true
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Install kind
+        run: |
+          curl -Lo /tmp/kind https://kind.sigs.k8s.io/dl/v0.24.0/kind-linux-amd64
+          sudo install -o root -g root -m 0755 /tmp/kind /usr/local/bin/kind
+          kind version
+
+      - name: Install kubectl
+        run: |
+          curl -Lo /tmp/kubectl "https://dl.k8s.io/release/$(curl -Ls https://dl.k8s.io/release/stable.txt)/bin/linux/amd64/kubectl"
+          sudo install -o root -g root -m 0755 /tmp/kubectl /usr/local/bin/kubectl
+          kubectl version --client
+
+      - name: Install jq + yq
+        run: |
+          sudo apt-get update && sudo apt-get install -y jq
+          sudo curl -Lo /usr/local/bin/yq https://github.com/mikefarah/yq/releases/latest/download/yq_linux_amd64
+          sudo chmod +x /usr/local/bin/yq
+          yq --version
+
+      - name: Install Claude Code CLI
+        run: npm install -g @anthropic-ai/claude-code
+
+      - name: Run evals
+        env:
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          KSTACK_EVAL_MAX_RUNS: 3
+          KSTACK_EVAL_BUDGET_USD: "2"
+        run: ./scripts/test-evals.sh
+
+      - name: Upload artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: eval-artifacts
+          path: tests/evals/artifacts/
+          retention-days: 30

@@ -1,0 +1,80 @@
+---
+name: {{SKILL_NAME}}
+description: NetworkPolicy, Service, Ingress, Gateway API, DNS and encryption checks
+---
+
+{{ENTRYPOINT}}
+
+{{GLOBAL_FLAGS}}
+
+{{PREAMBLE}}
+
+## Purpose
+
+Find broken or missing pieces in cluster networking: `NetworkPolicy` instances that don't match anything, `Service` instances with no endpoints, `Ingress` and Gateway API routes that won't resolve, DNS problems, and workloads talking in plaintext when a mesh is available. Read-only.
+
+## Arguments
+
+Optional natural-language scope. Examples:
+
+- `/audit-network` — full sweep across all five workflows.
+- `/audit-network policies` — run a single workflow by name (`policies`, `services`, `ingress`, `dns`, `mtls`).
+- `/audit-network ingress in prod` — workflow plus namespace / label-selector / workload filter.
+
+Flag-shaped tokens that aren't documented in Global flags must trigger the unknown-flag error line. Bare text is an intent hint, not an error.
+
+## Data collection
+
+Fetch in one consolidated call (use `-A` for full sweep, `-n <ns>` when scoped):
+
+    kubectl get networkpolicies,services,endpoints,pods,ingresses,secrets \
+      [-A | -n <ns>] -o json --context=<pinned>
+
+Probe optional CRDs once and cache the result for the rest of the run:
+
+- Gateway API: `kubectl get crd gateways.gateway.networking.k8s.io 2>/dev/null` — if missing, skip Workflow 3's Gateway checks. Absence is not a finding.
+- Mesh CRDs (Istio `peerauthentications.security.istio.io`, Linkerd `servers.policy.linkerd.io`, Cilium `ciliumnetworkpolicies.cilium.io`) — if none are present, skip Workflow 5 entirely. Absence is not a finding.
+
+CoreDNS state lives in `kube-system`: the `coredns` Deployment, the `coredns` ConfigMap, and (when scraped) the `/metrics` endpoint on each pod.
+
+## Workflow 1: NetworkPolicy
+
+- **Default-deny gap.** Namespaces with no `NetworkPolicy` selecting all pods (no default-deny ingress and/or egress) and pods covered by zero policies. Walk policies' `spec.podSelector` against pod labels per namespace.
+- **Selectors that match no pods or namespaces.** Policies whose `spec.podSelector` matches no pods, or whose `spec.ingress[*].from[*]`/`egress[*].to[*]` peer selectors (`podSelector`, `namespaceSelector`) match no pods or namespaces.
+- **Rules referencing ports/protocols target pods don't expose.** Cross-check `spec.ingress[*].ports` and `spec.egress[*].ports` against the `containerPort` set on selected pods.
+
+## Workflow 2: Service
+
+- **Services with zero ready endpoints.** Cross-check `Service` against the matching `Endpoints` object — empty `subsets[*].addresses` (vs. `notReadyAddresses`) means no ready backends.
+- **Selector / label and `port` / `targetPort` mismatches.** A `selector` that resolves to zero pods, or a `targetPort` (named or numeric) that doesn't match a `containerPort` on the selected pods.
+- **Headless Services not backing a StatefulSet.** `spec.clusterIP: None` services whose name isn't referenced by any StatefulSet's `spec.serviceName` are usually a leftover.
+
+## Workflow 3: Ingress & Gateway API
+
+- **Hostname collisions.** Two or more Ingresses (or Gateway routes) declaring the same `host` in the same class — only one wins, the rest are dead config.
+- **TLS entries referencing missing or expired Secrets.** Walk `spec.tls[*].secretName` and confirm the Secret exists and contains a non-expired cert. If RBAC denies reading the Secret, **note "Secret contents not readable due to RBAC"** rather than reporting a false "expired".
+- **Backends pointing at Services that don't exist or have no endpoints.** Cross-reference `spec.rules[*].http.paths[*].backend.service.name` (and Gateway `backendRefs`) against the Service set from Workflow 2.
+
+Skip the Gateway API portion when the `gateway.networking.k8s.io` CRDs are not installed.
+
+## Workflow 4: DNS
+
+- **CoreDNS pod health and recent restarts.** `kubectl -n kube-system get pods -l k8s-app=kube-dns -o json` — flag pods not Ready or with restart counts > 0 in the window.
+- **Elevated NXDOMAIN or SERVFAIL rates.** When CoreDNS metrics are scraped (Prometheus or `kubectl -n kube-system port-forward` against the `/metrics` endpoint of a coredns pod), check `coredns_dns_responses_total{rcode="NXDOMAIN"}` and `rcode="SERVFAIL"` rates. If metrics aren't reachable, say so — don't substitute live `dig` probes silently.
+- **Stub domains and forwarders that don't resolve.** Parse the `coredns` ConfigMap's `Corefile` for `forward` and stub-domain blocks; for each upstream, **check `coredns_forward_responses_total{to=…,rcode=…}` and `coredns_forward_request_duration_seconds` first** — these expose per-upstream failure rates without any extra cluster traffic. Only fall back to an in-cluster active-probe (`kubectl exec` into an existing pod, or a short-lived debug pod) when metrics aren't reachable or don't cover the upstream. **State the probe source** (which pod was used) in the report so failures can be interpreted.
+
+## Workflow 5: Encryption & mTLS
+
+Runs only when an Istio, Linkerd, or Cilium mesh is detected via the CRD probe above. Otherwise skip — absence is not a finding.
+
+- **Workloads outside the mesh's sidecar or ambient coverage.** Compare each pod's labels/annotations against the mesh's injection rules — pods without a sidecar (or not in an ambient-enrolled namespace) in a namespace that's otherwise meshed are likely misses.
+- **Namespaces or workloads in permissive (plaintext-allowed) mTLS mode.** Walk Istio `PeerAuthentication` (`mtls.mode == "PERMISSIVE"`), Linkerd `Server`/`MeshTLSAuthentication` opt-outs, or Cilium policy in non-strict modes. A permissive default is plaintext-on-the-wire by another name.
+
+## Reporting
+
+- **Group findings by workflow.** Within a workflow, rank by blast radius (a missing default-deny in `default` above a single mismatched targetPort).
+- **Include evidence, not just the verdict.** Cite the offending selectors, endpoint counts, ConfigMap keys, or annotation values inline so the user can verify without re-running the audit.
+- For TLS findings where Secret access was denied, say "Secret contents not readable due to RBAC" — don't guess the cert state.
+- For DNS active-probe findings, the report header for that workflow names the probe source pod.
+- If a workflow finds nothing, say so in one line — don't print an empty section.
+- Hand off to `/logs coredns` for CoreDNS log details when DNS metrics suggest something specific, and to `/investigate <kind>/<ns>/<name>` when a single workload is the root cause.

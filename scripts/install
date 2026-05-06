@@ -1,0 +1,494 @@
+#!/usr/bin/env bash
+
+# Copyright 2026 The Kubetail Authors
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+# kstack install — install kstack skills for one or more AI agents.
+#
+# Three install modes:
+#
+#   Dev (default, from a git clone) — for contributors hacking on kstack.
+#     Reads sources from <repo>/src/ and writes outputs at <repo>/.kstack/
+#     and <repo>/.<agent>/skills/<skill>/. Lets a contributor iterate on
+#     skills without a separate publish step. Invoked as `make install`.
+#
+#   Local (--local) — for end users who want kstack scoped to one project.
+#     Maintains a kstack-owned checkout at <cwd>/.kstack/upstream/ at the
+#     latest released tag, then renders skills into <cwd>/.<agent>/skills/
+#     <skill>/. The bootstrap at https://kubestack.xyz/install.sh drives
+#     this mode via `curl … | bash -s -- --local`.
+#
+#   Global (--global) — for ambient use outside any project.
+#     Maintains a kstack-owned checkout at ~/.config/kstack/upstream/ at
+#     the latest released tag, then renders skills from there into
+#     ~/.<agent>/skills/<skill>/SKILL.md (prefixed if --prefix was passed)
+#     and copies helper binaries into ~/.config/kstack/bin/.
+#
+# --local and --global never use the invoker's checkout as the source; the
+# canonical upstream is always cloned/updated fresh, so running these from
+# a fork cannot silently install the fork's contents.
+#
+# Upgrade:
+#     Dev:    `git pull && make install`
+#     Local:  `<cwd>/.kstack/bin/upgrade`
+#     Global: `~/.config/kstack/bin/upgrade`
+#
+# Usage:
+#   scripts/install                  Dev, auto-detect agents (falls back to claude).
+#   scripts/install --agent <name>   Limit to one agent.
+#   scripts/install --local          Local install into $PWD/.kstack.
+#   scripts/install --global         Global install for auto-detected agents.
+#   scripts/install --prefix <p>     Namespace skill slots as <p><skill> (default: kstack-).
+#   scripts/install --no-prefix      Install without any prefix (overrides default kstack-).
+#   scripts/install -q | --quiet     Suppress log output.
+#
+# Contributors normally invoke dev mode via `make install`.
+#
+# Supported agents: claude, codex, opencode, cursor, factory, slate, kiro, hermes
+
+set -eu
+
+# This script lives at <repo>/scripts/install. In dev mode, REPO_ROOT is
+# where install outputs (.kstack/, .<agent>/skills/) land.
+REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")/.." && pwd)"
+
+# shellcheck source=../src/lib/agents.sh
+. "$REPO_ROOT/src/lib/agents.sh"
+# shellcheck source=../src/lib/manifest.sh
+. "$REPO_ROOT/src/lib/manifest.sh"
+
+KSTACK_CONFIG_DIR="$HOME/.config/kstack"
+# Override KSTACK_REMOTE_URL for CI and local-clone testing. Leave unset for
+# normal user installs.
+KSTACK_REMOTE_URL="${KSTACK_REMOTE_URL:-https://github.com/kubetail-org/kstack.git}"
+
+QUIET=0
+log() { [ "$QUIET" -eq 0 ] && echo "$@" || true; }
+
+# ensure_src_checkout $upstream_dir $root_dir
+#   Clones (first time) or fetches+checks-out (subsequent runs) the canonical
+#   upstream at the latest tagged release into $upstream_dir, and writes the
+#   resolved tag to $root_dir/manifest/version. Pre-release fallback: if no
+#   `v*` tags exist anywhere, use `main` with a visible warning.
+ensure_src_checkout() {
+  local upstream="$1" root="$2"
+  mkdir -p "$root"
+  local tag
+  if [ -d "$upstream/.git" ]; then
+    git -C "$upstream" fetch --tags --quiet origin
+    tag="$(git -C "$upstream" tag -l 'v*' --sort=-v:refname | head -1)"
+    if [ -n "$tag" ]; then
+      git -C "$upstream" checkout --quiet "$tag"
+    else
+      git -C "$upstream" checkout --quiet main
+      git -C "$upstream" pull --ff-only --quiet origin main
+      tag="main"
+    fi
+    log "   📥 Upstream   → $upstream @ $tag"
+  else
+    tag="$(git ls-remote --tags "$KSTACK_REMOTE_URL" 'v*' 2>/dev/null \
+      | awk -F'refs/tags/' '/refs\/tags\/v[0-9]/ && !/\^\{\}$/ { print $2 }' \
+      | sort -V | tail -1)"
+    if [ -n "$tag" ]; then
+      git clone --depth 1 --branch "$tag" --quiet "$KSTACK_REMOTE_URL" "$upstream"
+    else
+      git clone --depth 1 --branch main --quiet "$KSTACK_REMOTE_URL" "$upstream"
+      tag="main"
+    fi
+    log "   📥 Upstream   → $upstream @ $tag (cloned)"
+  fi
+  manifest::write_version "$root" "$tag"
+}
+
+# render_skill $skill $skill_name $agent $root_dir $skill_dir $out_file $skills_src $global_flags_partial $entrypoint_partial $preamble_partial
+#   $skill      — source directory under $skills_src (template lookup)
+#   $skill_name — value substituted for {{SKILL_NAME}} (the user-visible
+#                 slot name: $PREFIX$skill, with $PREFIX empty by default)
+render_skill() {
+  local skill="$1" skill_name="$2" agent="$3" root_dir="$4" skill_dir="$5" out_file="$6"
+  local skills_src="$7" gf="$8" ep="$9" pr="${10}"
+  mkdir -p "$(dirname "$out_file")"
+  awk -v gf="$gf" -v ep="$ep" -v pr="$pr" \
+      -v root_dir="$root_dir" \
+      -v skill_dir="$skill_dir" \
+      -v skill_name="$skill_name" -v agent="$agent" '
+    function subst(s) {
+      gsub(/\{\{ROOT_DIR\}\}/,     root_dir,   s)
+      gsub(/\{\{SKILL_DIR\}\}/,    skill_dir,  s)
+      gsub(/\{\{SKILL_NAME\}\}/,   skill_name, s)
+      gsub(/\{\{AGENT\}\}/,        agent,      s)
+      return s
+    }
+    function inline(path,    line) {
+      while ((getline line < path) > 0) print subst(line)
+      close(path)
+    }
+    /\{\{GLOBAL_FLAGS\}\}/ { inline(gf); next }
+    /\{\{ENTRYPOINT\}\}/   { inline(ep); next }
+    /\{\{PREAMBLE\}\}/     { inline(pr); next }
+    { print subst($0) }
+  ' "$skills_src/$skill/SKILL.md.tmpl" > "$out_file"
+}
+
+# render_help $skill $readme $out_file
+#
+# Renders a help page for $skill by extracting its <dt>/<dd> block from
+# $readme and appending the global-flags table. Exits non-zero if no
+# matching section is found.
+render_help() {
+  local skill="$1" readme="$2" out_file="$3"
+  mkdir -p "$(dirname "$out_file")"
+
+  awk -v skill="$skill" '
+    BEGIN { found = 0; in_skill = 0; in_body = 0; in_flags = 0 }
+
+    # Skill body: capture lines between <dd> and </dd> under the target heading.
+    $0 ~ "^#### `/" skill "(`| )" {
+      found = 1
+      in_skill = 1
+      body = body "# /" skill "\n\n"
+      next
+    }
+    in_skill && /^<dd>$/ { in_body = 1; next }
+    in_body && /^<\/dd>$/ { in_body = 0; in_skill = 0; next }
+    in_body { body = body $0 "\n"; next }
+
+    # Global flags: from "**Global flags**" line to the next horizontal rule.
+    /^\*\*Global flags\*\*/ { in_flags = 1 }
+    in_flags && /^---$/ { in_flags = 0; next }
+    in_flags { flags = flags $0 "\n" }
+
+    END {
+      if (!found) {
+        print "render_help: no README section for /" skill > "/dev/stderr"
+        exit 2
+      }
+      printf "%s\n%s", body, flags
+    }
+  ' "$readme" > "$out_file" || {
+    local rc=$?
+    rm -f "$out_file"
+    return "$rc"
+  }
+}
+
+# prune_orphans $target_dir $glob $keep $label
+#   Remove any child of $target_dir matching $glob whose basename is not in
+#   $keep (space-delimited). Logs each removal as "    pruned: ${label}<basename>".
+#   No-op if $target_dir is missing or the glob matches nothing.
+prune_orphans() {
+  local dir="$1" glob="$2" keep="$3" label="$4"
+  [ -d "$dir" ] || return 0
+  local entry base
+  for entry in "$dir"/$glob; do
+    [ -e "$entry" ] || continue
+    base="${entry%/}"; base="${base##*/}"
+    case " $keep " in
+      *" $base "*) continue ;;
+    esac
+    rm -rf "$entry"
+    log "   🗑  pruned: ${label}${base}"
+  done
+}
+
+# install_agent $agent $root_dir $skills_dir $slot_prefix $stale_slots
+#   $slot_prefix is user-supplied via --prefix (default ""). Slots render as
+#   $skills_dir/${slot_prefix}${skill}/.
+#   $stale_slots is a space-delimited list of slot names from the previous
+#   install that are no longer part of the current set (different prefix,
+#   skill renamed, skill removed from source). Each is removed from
+#   $skills_dir if present.
+install_agent() {
+  local agent="$1" root_dir="$2" skills_dir="$3" slot_prefix="$4" stale_slots="$5"
+  mkdir -p "$skills_dir"
+
+  local slots="" skill slot out_dir out_file help_file
+  for skill in $SKILL_NAMES; do
+    slot="${slot_prefix}${skill}"
+    out_dir="$skills_dir/$slot"
+    out_file="$out_dir/SKILL.md"
+    help_file="$out_dir/references/help.md"
+    # Clear stale symlinks / non-dirs left by a previous install before re-rendering.
+    if [ -L "$out_dir" ] || { [ -e "$out_dir" ] && [ ! -d "$out_dir" ]; }; then
+      rm -f "$out_dir"
+    fi
+    [ -L "$out_file" ] && rm -f "$out_file"
+    [ -L "$help_file" ] && rm -f "$help_file"
+    mkdir -p "$out_dir"
+    render_skill "$skill" "$slot" "$agent" "$root_dir" "$out_dir" "$out_file" \
+      "$SKILLS_SRC" "$GLOBAL_FLAGS_PARTIAL" "$ENTRYPOINT_PARTIAL" "$PREAMBLE_PARTIAL"
+    render_help "$skill" "$REPO_ROOT/README.md" "$help_file"
+    echo "https://kstack.sh/reference/skills/$skill" > "$out_dir/references/docs-url.txt"
+    copy_skill_scripts "$SKILLS_SRC/$skill/scripts" "$out_dir/scripts"
+    slots="$slots $slot"
+  done
+
+  local n=0
+  for _ in $slots; do n=$((n + 1)); done
+  local plural=s
+  [ "$n" = 1 ] && plural=""
+  log "   🤖 $agent   → $skills_dir  ($n skill$plural)"
+
+  local stale
+  for stale in $stale_slots; do
+    [ -n "$stale" ] || continue
+    [ -e "${skills_dir}/${stale}" ] || continue
+    rm -rf "${skills_dir:?}/${stale:?}"
+    log "   🗑  pruned: $stale"
+  done
+}
+
+# sync_dir $src $glob $dst $label $executable
+#   Copies $src/$glob → $dst/, then prunes any $glob-matching orphan in $dst.
+#   Skips .gitkeep placeholders. $executable=1 chmods each copy +x.
+sync_dir() {
+  local src="$1" glob="$2" dst="$3" label="$4" executable="$5"
+  mkdir -p "$dst"
+  local f name keep=""
+  for f in "$src"/$glob; do
+    [ -e "$f" ] || continue
+    name="${f##*/}"
+    [ "$name" = ".gitkeep" ] && continue
+    cp "$f" "$dst/"
+    [ "$executable" = 1 ] && chmod +x "$dst/$name"
+    keep="$keep $name"
+  done
+  prune_orphans "$dst" "$glob" "${keep# }" "$label"
+}
+
+# copy_bin $src $dst
+#   Materialize every file in $src/ into $dst/ as an executable helper.
+copy_bin() { sync_dir "$1" '*' "$2" "bin/" 1; }
+
+# copy_schemas $src $dst
+#   Sync *.json schema files (response envelope etc.) into $dst/.
+copy_schemas() { sync_dir "$1" '*.json' "$2" "schemas/" 0; }
+
+# copy_skill_scripts $src $dst
+#   Mirror a skill's scripts/ dir into the rendered slot. Top-level files are
+#   chmod +x (entrypoint-dispatched scripts); subdirs like scripts/lib/ are
+#   copied recursively so skills can modularize helpers they source at runtime.
+#   The slot is owned entirely by the installer, so we wipe $dst and rebuild
+#   it from source — orphan pruning happens at the skill-slot level above.
+copy_skill_scripts() {
+  local src="$1" dst="$2"
+  rm -rf "$dst"
+  [ -d "$src" ] || return 0
+  mkdir -p "$dst"
+  local f name
+  for f in "$src"/*; do
+    [ -e "$f" ] || continue
+    name="${f##*/}"
+    [ "$name" = ".gitkeep" ] && continue
+    if [ -d "$f" ]; then
+      cp -R "$f" "$dst/$name"
+    else
+      cp "$f" "$dst/$name"
+      chmod +x "$dst/$name"
+    fi
+  done
+}
+
+# copy_lib $src $dst — sync lib/*.sh and each lib/<subdir>/ (per-skill helpers).
+copy_lib() {
+  local src="$1" dst="$2" d name keep=""
+  sync_dir "$src" '*.sh' "$dst" "lib/" 0
+  for d in "$src"/*/; do
+    [ -d "$d" ] || continue
+    name="${d%/}"; name="${name##*/}"
+    rm -rf "${dst:?}/$name"
+    cp -R "$d" "$dst/$name"
+    keep="$keep $name"
+  done
+  prune_orphans "$dst" '*/' "${keep# }" "lib/"
+}
+
+# write_dev_version $root $src — record tag or branch; empty on detached HEAD.
+write_dev_version() {
+  local version
+  version="$(git -C "$2" describe --tags --exact-match HEAD 2>/dev/null \
+          || git -C "$2" rev-parse --abbrev-ref HEAD 2>/dev/null \
+          || true)"
+  [ "$version" = "HEAD" ] && version=""
+  manifest::write_version "$1" "$version"
+}
+
+main() {
+  AGENT=""
+  GLOBAL=0
+  LOCAL=0
+  PREFIX="kstack-"
+  while [ $# -gt 0 ]; do
+    case "$1" in
+      --agent)
+        [ -z "${2:-}" ] && { echo "Missing value for --agent" >&2; exit 1; }
+        AGENT="$2"; shift 2 ;;
+      --agent=*) AGENT="${1#--agent=}"; shift ;;
+      --global) GLOBAL=1; shift ;;
+      --local) LOCAL=1; shift ;;
+      --no-prefix) PREFIX=""; shift ;;
+      --prefix)
+        [ $# -lt 2 ] && { echo "Missing value for --prefix" >&2; exit 1; }
+        PREFIX="$2"; shift 2 ;;
+      --prefix=*) PREFIX="${1#--prefix=}"; shift ;;
+      -q|--quiet) QUIET=1; shift ;;
+      -h|--help)
+        sed -n '2,/^[^#]/{ /^#/s/^# \{0,1\}//p; }' "$0"
+        exit 0 ;;
+      *) echo "Unknown option: $1" >&2; exit 1 ;;
+    esac
+  done
+
+  # Reject prefixes that would produce unsafe slot names.
+  if [ -n "$PREFIX" ]; then
+    case "$PREFIX" in
+      .*|*[!A-Za-z0-9._-]*) echo "Invalid --prefix: $PREFIX" >&2; exit 1 ;;
+    esac
+  fi
+
+  if [ "$GLOBAL" -eq 1 ] && [ "$LOCAL" -eq 1 ]; then
+    echo "--global and --local are mutually exclusive" >&2
+    exit 1
+  fi
+
+  TARGET_AGENTS=""
+  if [ -z "$AGENT" ]; then
+    for h in $KNOWN_AGENTS; do
+      if command -v "$(agent_cli "$h")" >/dev/null 2>&1; then
+        TARGET_AGENTS="$TARGET_AGENTS $h"
+      fi
+    done
+    if [ -z "$TARGET_AGENTS" ]; then
+      log "No agent CLIs detected on PATH — installing for claude by default."
+      TARGET_AGENTS="claude"
+    fi
+  else
+    if ! is_known_agent "$AGENT"; then
+      echo "Unknown agent: $AGENT" >&2
+      echo "Supported: $KNOWN_AGENTS" >&2
+      exit 1
+    fi
+    TARGET_AGENTS="$AGENT"
+  fi
+  TARGET_AGENTS="${TARGET_AGENTS# }"
+
+  # Resolve mode-specific paths. REPO_ROOT is the top of the source checkout
+  # (holds README.md and the src/ subdir); SRC_ROOT is the src/ subdir itself.
+  # Managed modes (global, local) maintain upstream/ inside ROOT_DIR; dev mode
+  # reads sources from the in-repo checkout this script sits in.
+  if [ "$GLOBAL" -eq 1 ]; then
+    MODE=global
+    ROOT_DIR="$KSTACK_CONFIG_DIR"
+    LABEL="global"
+  elif [ "$LOCAL" -eq 1 ]; then
+    MODE=local
+    ROOT_DIR="$PWD/.kstack"
+    LABEL="local → $PWD"
+  else
+    MODE=dev
+    ROOT_DIR="$REPO_ROOT/.kstack"
+    LABEL="dev"
+  fi
+
+  # shellcheck disable=SC2086 # intentional word-splitting to format each agent
+  log "🚀 Installing kstack ($LABEL) ·$(printf ' %s' $TARGET_AGENTS)"
+  log ""
+
+  if [ "$MODE" != dev ]; then
+    ensure_src_checkout "$ROOT_DIR/upstream" "$ROOT_DIR"
+    REPO_ROOT="$ROOT_DIR/upstream"
+  fi
+  SRC_ROOT="$REPO_ROOT/src"
+  LIB_DIR="$ROOT_DIR/lib"
+
+  SKILLS_SRC="$SRC_ROOT/skills"
+
+  if [ ! -d "$SKILLS_SRC" ]; then
+    echo "No skills/ directory at $SKILLS_SRC" >&2
+    exit 1
+  fi
+
+  SKILL_NAMES=""
+  for d in "$SKILLS_SRC"/*/; do
+    [ -f "${d}SKILL.md.tmpl" ] || continue
+    d="${d%/}"
+    SKILL_NAMES="$SKILL_NAMES ${d##*/}"
+  done
+  SKILL_NAMES="${SKILL_NAMES# }"
+
+  if [ -z "$SKILL_NAMES" ]; then
+    echo "No SKILL.md.tmpl files found under $SKILLS_SRC" >&2
+    exit 1
+  fi
+
+  GLOBAL_FLAGS_PARTIAL="$SKILLS_SRC/_partials/global-flags.md"
+  ENTRYPOINT_PARTIAL="$SKILLS_SRC/_partials/entrypoint.md"
+  PREAMBLE_PARTIAL="$SKILLS_SRC/_partials/preamble.md"
+  for p in "$GLOBAL_FLAGS_PARTIAL" "$ENTRYPOINT_PARTIAL" "$PREAMBLE_PARTIAL"; do
+    if [ ! -f "$p" ]; then
+      echo "ERROR: missing partial: $p" >&2
+      exit 1
+    fi
+  done
+
+  mkdir -p "$ROOT_DIR/cache"
+
+  copy_bin "$SRC_ROOT/bin" "$ROOT_DIR/bin"
+  copy_lib "$SRC_ROOT/lib" "$LIB_DIR"
+  copy_schemas "$SRC_ROOT/schemas" "$ROOT_DIR/schemas"
+  log "   📦 Helpers    → $ROOT_DIR"
+
+  # Managed modes already wrote manifest/version via ensure_src_checkout;
+  # dev mode stamps it from the current git checkout.
+  [ "$MODE" = dev ] && write_dev_version "$ROOT_DIR" "$REPO_ROOT"
+
+  # Slot names are uniform across agents ($PREFIX + skill), so the prev→new
+  # diff is computed once and each agent prunes the same stale set.
+  NEW_SLOTS=""
+  for s in $SKILL_NAMES; do NEW_SLOTS="$NEW_SLOTS ${PREFIX}${s}"; done
+  STALE_SLOTS=""
+  for p in $(manifest::read_skills "$ROOT_DIR"); do
+    case " $NEW_SLOTS " in
+      *" $p "*) ;;
+      *) STALE_SLOTS="$STALE_SLOTS $p" ;;
+    esac
+  done
+
+  for h in $TARGET_AGENTS; do
+    case "$MODE" in
+      global) skills_dir="$(agent_skills_dir_global "$h")" ;;
+      local)  skills_dir="$(agent_skills_dir_local "$PWD" "$h")" ;;
+      dev)    skills_dir="$(agent_skills_dir_local "$REPO_ROOT" "$h")" ;;
+    esac
+    install_agent "$h" "$ROOT_DIR" "$skills_dir" "$PREFIX" "${STALE_SLOTS# }"
+  done
+
+  # shellcheck disable=SC2086 # intentional word-splitting — each token is a slot.
+  manifest::write_skills "$ROOT_DIR" $NEW_SLOTS
+
+  log ""
+  log "✅ kstack installed. Start a session with your agent to use the skills."
+  log ""
+  if [ "$MODE" = dev ]; then
+    log "   Upgrade:   git pull && make install"
+    log "   Uninstall: delete this kstack repo directory."
+  else
+    log "   Upgrade:   $ROOT_DIR/bin/upgrade"
+    log "   Uninstall: $ROOT_DIR/bin/uninstall"
+  fi
+}
+
+if [ "${BASH_SOURCE[0]:-$0}" = "$0" ]; then
+  main "$@"
+fi

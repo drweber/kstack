@@ -1,0 +1,16 @@
+id: audit-outdated-old-image
+skill: audit-outdated
+description: >
+  Verifies that /audit-outdated flags a pod running nginx:1.20 (well
+  behind the latest stable nginx tag) — the LLM-driven Workflow 3
+  (Container image freshness). wait.sh pre-seeds the deprecated-APIs
+  backend to "skip" so scripts/main doesn't enter the needs_setup
+  prompt-the-user flow during scoring; teardown.sh removes the
+  preference so the eval doesn't leak host state.
+namespace: eval-audit-outdated-old-image
+runs: 3
+pass_threshold: 2
+wait_seconds: 30
+claude_flags:
+  model: ""
+  allowed_tools: "Bash"

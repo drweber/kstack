@@ -1,0 +1,14 @@
+apiVersion: v1
+kind: Pod
+metadata:
+  name: crasher
+spec:
+  containers:
+    - name: crasher
+      image: busybox:latest
+      command: ["sh", "-c", "exit 1"]
+      resources:
+        requests:
+          cpu: 10m
+          memory: 16Mi
+  restartPolicy: Always

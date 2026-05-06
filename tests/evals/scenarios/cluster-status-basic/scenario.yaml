@@ -1,0 +1,12 @@
+id: cluster-status-basic
+skill: cluster-status
+description: >
+  Verifies that /cluster-status runs on a minimal kind cluster and emits
+  the expected one-line node/pod summary. No planted failures — happy path only.
+namespace: eval-cluster-status-basic
+runs: 3
+pass_threshold: 2
+wait_seconds: 0
+claude_flags:
+  model: ""
+  allowed_tools: "Bash"

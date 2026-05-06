@@ -1,0 +1,7 @@
+# Verify /audit-security flags privileged + hostNetwork as host escapes.
+rubric:
+  must_mention:
+    - "privileged-pod"
+    - "privileged"
+    - "hostNetwork"
+  must_not_mention: []

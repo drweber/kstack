@@ -1,0 +1,17 @@
+id: _placeholder
+skill: none
+description: >
+  Smoke scenario that exercises the full eval pipeline (apply → wait →
+  claude -p → score → teardown) against a trivial fixture. Skipped by
+  default; run with `./scripts/test-evals.sh --include-placeholder`.
+  Replace with the first real scenario (`cluster-status-crashloop`) once
+  /cluster-status is scaffolded.
+placeholder: true
+namespace: eval-placeholder
+runs: 1
+pass_threshold: 1
+timeout_seconds: 120
+wait_seconds: 30
+claude_flags:
+  model: ""            # leave empty to use the CLI's default model
+  allowed_tools: "Bash,Read"

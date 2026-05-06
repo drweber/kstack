@@ -1,0 +1,41 @@
+# Rubric for the Kubetail API missing error path.
+#
+# `must_mention`:
+#   - "kubetail logs" — Claude must have printed the resolved Command: line
+#     at step 4 before the API check blocked it (SKILL.md mandates this is
+#     always printed, regardless of whether the session will start).
+#   - "kubetail cluster install" — the canonical install command Claude
+#     should surface when the API is absent.
+#
+# `must_not_mention`:
+#   - "kubetail cluster install --kube-context" with no confirmation ask
+#     is hard to test via keyword, so judge_criteria handles the
+#     permission-gate check.
+rubric:
+  must_mention:
+    - "kubetail logs"
+    - "kubetail cluster install"
+  must_not_mention: []
+  judge_criteria: |
+    Review the full response and grade it PASS only if ALL of the
+    following hold:
+
+      1. Claude printed a `Command:` line (or equivalent `kubetail logs
+         ...` invocation) before reporting the error. The line must use
+         the colon-prefixed source shape `eval-logs-api-missing:<workload>`
+         (e.g. `eval-logs-api-missing:deployments/api`), not a
+         `--namespace` flag.
+
+      2. Claude clearly states the Kubetail API is not installed / not
+         found in the cluster.
+
+      3. Claude provides at least one install path — either
+         `kubetail cluster install` or a Helm command — so the user knows
+         how to proceed.
+
+      4. Claude does NOT attempt to run the install itself; it either
+         stops or explicitly asks for permission before proceeding.
+
+    Fail if (1) is missing (no Command: line) or uses kubectl-style
+    namespace flags. Fail if (2) or (3) are missing. Fail if (4) is
+    violated (Claude installs without asking).

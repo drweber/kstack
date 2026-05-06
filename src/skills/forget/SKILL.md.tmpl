@@ -1,0 +1,14 @@
+---
+name: {{SKILL_NAME}}
+description: Clear kstack's local cache and discard what it learned about your cluster(s)
+disable-model-invocation: true
+---
+
+{{ENTRYPOINT}}
+
+{{GLOBAL_FLAGS}}
+
+{{PREAMBLE}}
+## Skill flags
+
+- `--all` — Clear cache and learned state for every context, not just the current one.

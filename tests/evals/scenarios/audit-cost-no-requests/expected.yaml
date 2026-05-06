@@ -1,0 +1,6 @@
+# Verify /audit-cost flags the pod with no resources.requests set.
+rubric:
+  must_mention:
+    - "best-effort-pod"
+    - "requests"
+  must_not_mention: []

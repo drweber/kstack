@@ -1,0 +1,10 @@
+# Verify /metrics detects in-cluster Prometheus and picks it for a
+# windowed query. The fake prometheus service won't actually answer
+# PromQL — that's fine. We're checking that the agent acknowledges the
+# Prometheus source from the briefing and attempts to query it (rather
+# than silently falling back to metrics-server, which would lose the
+# time window the user asked for).
+rubric:
+  must_mention:
+    - "prometheus"
+  must_not_mention: []

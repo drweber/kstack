@@ -1,0 +1,12 @@
+id: audit-cost-unused-loadbalancer
+skill: audit-cost
+description: >
+  Verifies that /audit-cost flags a Service of type LoadBalancer with no
+  endpoints — the API-only Workflow 3 check.
+namespace: eval-audit-cost-unused-loadbalancer
+runs: 3
+pass_threshold: 2
+wait_seconds: 30
+claude_flags:
+  model: ""
+  allowed_tools: "Bash"

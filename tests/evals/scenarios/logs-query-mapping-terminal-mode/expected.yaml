@@ -1,0 +1,36 @@
+rubric:
+  must_mention:
+    # The resolved invocation must appear in chat.
+    - "kubetail logs"
+    # Namespace appears inside the source positional arg, not as a flag.
+    # The trailing colon is unique to the correct shape: `eval-logs-terminal:`
+    # cannot appear in the buggy forms (`--namespace=eval-logs-terminal` or
+    # `-n eval-logs-terminal`).
+    - "eval-logs-terminal:"
+  must_not_mention: []
+  judge_criteria: |
+    Find the `Command:` line Claude printed (or any `kubetail logs …`
+    invocation if no `Command:` label is present). Grade ONLY that
+    invocation — ignore any `kubectl` commands run for verification.
+
+    PASS only if ALL of the following hold:
+
+      1. The first positional source argument uses the colon-prefixed shape
+         `eval-logs-terminal:<workload>` — e.g. `eval-logs-terminal:deployments/api`
+         or `eval-logs-terminal:<pod-name>` if the agent resolved to a pod.
+
+      2. The invocation does NOT contain `--namespace`, `-n`,
+         `--all-namespaces`, or `-A` — `kubetail logs` has no namespace
+         flags; namespace is encoded in the source positional.
+
+      3. The invocation does NOT contain `--container`, `-c`, `--selector`,
+         or `-l` — `kubetail logs` has no such flags.
+
+      4. The invocation includes a time-window flag consistent with "last 15
+         minutes" (e.g. `--since=PT15M`) and a grep flag for "error"
+         (e.g. `--grep=error` or `--grep error`).
+
+      5. The invocation includes `--kube-context=kind-kstack-test`.
+
+    Fail on violations of (1)–(4). Treat (5) as a soft check: note it in
+    `violations` but do not fail solely on (5).

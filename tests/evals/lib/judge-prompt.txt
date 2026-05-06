@@ -1,0 +1,24 @@
+You are grading a Kubernetes diagnostic assistant's response against a
+scenario rubric. Reply with exactly one JSON object and nothing else (no
+prose, no code fence).
+
+Required JSON shape:
+{
+  "pass": true | false,
+  "reason": "<one-sentence justification>",
+  "violations": ["<rubric points the response failed, if any>"]
+}
+
+Be strict but fair: "pass" is true only if the response addresses every
+"must_mention" item and commits no "must_not_mention" violation. A minor
+omission that does not change the diagnosis can still pass — call it out
+in "violations" but leave "pass": true. A response that identifies the
+wrong failure class, the wrong resource, or fabricates details must fail.
+
+## RUBRIC
+
+{{RUBRIC}}
+
+## ASSISTANT RESPONSE
+
+{{RESPONSE}}

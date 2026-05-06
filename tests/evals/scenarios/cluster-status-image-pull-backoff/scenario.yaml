@@ -1,0 +1,12 @@
+id: cluster-status-image-pull-backoff
+skill: cluster-status
+description: >
+  Verifies that /cluster-status detects and reports an ImagePullBackOff pod.
+  Plants a pod with a non-existent image tag and waits for the pull to fail.
+namespace: eval-cluster-status-image-pull
+runs: 3
+pass_threshold: 2
+wait_seconds: 60
+claude_flags:
+  model: ""
+  allowed_tools: "Bash"

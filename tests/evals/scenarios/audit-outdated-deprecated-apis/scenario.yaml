@@ -1,0 +1,15 @@
+id: audit-outdated-deprecated-apis
+skill: audit-outdated
+description: >
+  Verifies that /audit-outdated runs Workflow 2 (Deprecated APIs) using
+  the `web` backend — no pluto/kubent install required. wait.sh pins
+  the backend preference to "web" so the agent uses the kubernetes.io
+  deprecation guide path. On a clean kind cluster the expected outcome
+  is "no deprecated APIs detected".
+namespace: eval-audit-outdated-deprecated-apis
+runs: 3
+pass_threshold: 2
+wait_seconds: 30
+claude_flags:
+  model: ""
+  allowed_tools: "Bash"

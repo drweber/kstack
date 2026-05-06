@@ -1,0 +1,73 @@
+---
+name: {{SKILL_NAME}}
+description: Requests vs. usage, over-provisioning, idle capacity
+---
+
+{{ENTRYPOINT}}
+
+{{GLOBAL_FLAGS}}
+
+{{PREAMBLE}}
+
+## Purpose
+
+Find workloads that are over-provisioned, idle, or holding storage and load balancers nothing is using. Read-only. The skill exists to surface waste — not to recommend hard caps — so framing matters: only flag gaps large enough to matter in practice. Small deltas are noise.
+
+## Arguments
+
+Optional natural-language scope. Examples:
+
+- `/audit-cost` — full sweep across all three workflows.
+- `/audit-cost requests` — run a single workflow by name (`requests`, `idle`, `storage`).
+- `/audit-cost idle in staging` — workflow plus namespace / label-selector / workload filter.
+
+Flag-shaped tokens that aren't documented in Global flags must trigger the unknown-flag error line. Bare text is an intent hint, not an error.
+
+## Sources & window
+
+Right-sizing needs history. Detect Prometheus first; if reachable, use a **7-day lookback** for p95-style aggregates. If only `metrics-server` is available, fall back to its live snapshot — usable for current usage but not for distributions over time. Detection is the same probe the `/metrics` skill uses.
+
+The first line of the report **must** name the source (`metrics-server` or `Prometheus`) and the effective lookback (`7d`, `live snapshot`, or whatever Prometheus retention truncates it to — Prometheus retention may be shorter than the default 7 days).
+
+## Data collection
+
+Fetch the Kubernetes API objects in **one consolidated call**, reused across all three workflows. Use `-A` for a full sweep, or `-n <ns>` when the user scoped to a namespace; PVs and `nodes` are cluster-scoped and ignore `-n`, fetch them separately when relevant. Single shot:
+
+    kubectl get pods,deployments,statefulsets,jobs,cronjobs,pvc,svc,endpoints \
+      [-A | -n <ns>] -o json --context=<pinned>
+    kubectl get pv -o json --context=<pinned>          # cluster-scoped
+
+Reuse the resulting pod list everywhere — Workflow 1 walks `containerStatuses[*].lastState.terminated` for OOMKilled, Workflow 3 walks `spec.volumes[*].persistentVolumeClaim.claimName` for PVC mount-checks. Don't refetch.
+
+For Prometheus / metrics-server queries, fan them out **in parallel** when independent (e.g. p95 CPU and p95 memory for the same workload set are independent — issue them concurrently rather than serially).
+
+## Workflow 1: CPU & memory requests vs. actual usage
+
+Compare each container's `resources.requests` against observed usage:
+
+- Containers where `requests.cpu` or `requests.memory` is significantly higher than observed **p95** usage over the window. Define "significantly higher" pragmatically — e.g. requests ≥ 2× p95 with an absolute floor that filters out tiny workloads (don't flag a 50m → 10m gap).
+- Containers with **no `resources.requests` set** at all — these are best-effort and disrupt scheduler bin-packing.
+- Containers hitting their memory limit — count `OOMKilled` container terminations in the window. Walk the consolidated pod list's `status.containerStatuses[*].lastState.terminated.reason == "OOMKilled"`.
+
+When Prometheus is not available, p95-based findings cannot be produced from a live snapshot — mark them as **"not available — Prometheus required"** in the report rather than silently dropping them. Live current-usage findings (no-requests, OOMKilled) still apply.
+
+## Workflow 2: Idle workloads
+
+- **Deployments and StatefulSets** with zero traffic and near-zero CPU over the window. Use Prometheus when present; with `metrics-server` only, mark traffic checks as not available and rely on near-zero current CPU as a weaker signal (call it out in the finding).
+- **Jobs and CronJobs** that have been failing or suspended long enough to be forgotten. From the Kubernetes API: Jobs with `status.failed > 0` and no recent successful completion; CronJobs with `spec.suspend: true` or whose most recent Job is old and failing.
+
+## Workflow 3: Unused storage & load balancers
+
+All three checks use objects already in the consolidated fetch above:
+
+- **PersistentVolumes in `Released` state** — the bound PVC was deleted but the PV stuck around (typical with `Retain` reclaim policy). Filter the cluster-scoped PV list for `status.phase == "Released"`.
+- **PVCs bound but not mounted by any pod** — `status.phase == "Bound"` PVCs whose name doesn't appear in any pod's `spec.volumes[*].persistentVolumeClaim.claimName`. (Reuse the same pod list from Workflow 1.)
+- **`Service` objects of type `LoadBalancer` with no endpoints** — load balancers cost money even with zero traffic. Cross-check `spec.type == "LoadBalancer"` services against the endpoints list (empty `subsets[*].addresses`).
+
+## Reporting
+
+- **Header line** states source and effective lookback (e.g. `Source: Prometheus · Lookback: 7d` or `Source: metrics-server · Lookback: live snapshot`). Without this header the rest of the report can't be calibrated.
+- Rank findings by potential impact: large requests-vs-usage gaps and idle workloads above unmounted PVCs and `Released` PVs, since the former usually represent recurring spend on running pods while the latter are typically cheap to leave.
+- Suppress small/noisy gaps — only flag deltas large enough to matter in practice. A 50m → 30m CPU gap or a 10Mi → 8Mi memory gap is noise.
+- Group findings by workflow. If a workflow finds nothing, say so in one line — don't print an empty section.
+- Hand off to `/metrics <workload>` when the user wants to see the underlying time series for a specific workload.

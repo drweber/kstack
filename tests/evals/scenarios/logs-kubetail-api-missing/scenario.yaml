@@ -1,0 +1,18 @@
+id: logs-kubetail-api-missing
+skill: logs
+description: >
+  Tests the skill's error path when the Kubetail API is not installed in
+  the cluster. The fixture plants an `api` deployment so target resolution
+  (step 2) succeeds, but no Kubetail API pod is present. The rubric
+  verifies that Claude: (a) still prints a well-formed `Command:` line
+  before stopping (per SKILL.md step 4 — mandatory regardless of whether
+  the session will start), (b) correctly identifies the API is missing,
+  and (c) provides install instructions without attempting the install
+  without user permission.
+namespace: eval-logs-api-missing
+runs: 3
+pass_threshold: 2
+wait_seconds: 60
+claude_flags:
+  model: ""
+  allowed_tools: "Bash,Read"

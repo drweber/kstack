@@ -1,0 +1,2 @@
+Run `kubectl get pods -n eval-placeholder -o name` and report the names of
+the pods you see. Reply in one short sentence.

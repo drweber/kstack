@@ -1,0 +1,92 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://kubestack.xyz/schemas/response.schema.json",
+  "title": "kstack script response envelope",
+  "description": "Every kstack script (bin/entrypoint, skills/<name>/scripts/main) writes exactly one JSON object matching this schema to stdout and exits 0 on a clean run. Non-zero exits are reserved for unexpected crashes. The agent parses this envelope and dispatches based on `status` and `render`. Error categories let the agent present user-fixable problems differently from environment failures. Protocol version is carried in the `kstack` field.",
+  "type": "object",
+  "required": ["kstack", "status"],
+  "unevaluatedProperties": false,
+  "properties": {
+    "kstack": {
+      "const": "1",
+      "description": "Protocol version. Always the string \"1\" for v1."
+    },
+    "status": {
+      "enum": ["ok", "error"],
+      "description": "Outcome. `ok` means the script ran to completion; `error` means it could not produce a response."
+    },
+    "notice": {
+      "type": "string",
+      "description": "Optional operator notice (update-available banner, etc.). When present the agent prepends it verbatim to its reply, above any `content` or `message`."
+    },
+    "kube_context": {
+      "type": "string",
+      "description": "The kube context this turn ran against, resolved by the entrypoint (precedence: --context flag > $KSTACK_KUBE_CONTEXT env > `kubectl config current-context`). When present the agent treats it as the pinned cluster identity and threads `--context=<value>` into every follow-up kstack skill call in the session. Absent when the entrypoint could not resolve a context (errors before the skill body ran)."
+    }
+  },
+  "oneOf": [
+    {
+      "title": "Successful response",
+      "required": ["status", "render", "content"],
+      "properties": {
+        "status": { "const": "ok" },
+        "render": {
+          "enum": ["verbatim", "agent"],
+          "description": "How the agent should handle `content`. `verbatim`: print `content` as-is and end the turn (fast path — no reformatting, no commentary). `agent`: treat `content` as tool output context and continue reasoning through the rest of SKILL.md; empty content is a preamble-only ack."
+        },
+        "content": {
+          "type": "string",
+          "description": "Payload. For `render:verbatim` this is exactly what should appear in the terminal. For `render:agent` this is tool output the agent reads (may be empty)."
+        },
+        "agent_context": {
+          "type": "string",
+          "description": "Optional side-channel the agent reads but never shows the user. Use for structured metadata the agent needs for follow-ups (cache paths, context names, counts) that would clutter `content` if embedded there. Format is skill-specific — typically compact JSON the agent parses."
+        }
+      }
+    },
+    {
+      "title": "Error response",
+      "required": ["status", "kind", "message"],
+      "properties": {
+        "status": { "const": "error" },
+        "kind": {
+          "enum": ["user", "infra"],
+          "description": "`user`: user-fixable (bad flag, missing arg, invalid context). `infra`: environment/install failure (missing binary, broken cache, kubectl network error)."
+        },
+        "message": {
+          "type": "string",
+          "description": "User-facing error message. The agent prints this verbatim and ends the turn."
+        }
+      }
+    }
+  ],
+  "examples": [
+    {
+      "kstack": "1",
+      "status": "ok",
+      "render": "verbatim",
+      "content": "Context: kind-kstack-test\nAPI server: https://127.0.0.1:6443\n...",
+      "agent_context": "{\"cache_dir\":\"/home/user/.kstack/cache/cluster-status/9e6850d5af87\"}",
+      "kube_context": "kind-kstack-test"
+    },
+    {
+      "kstack": "1",
+      "status": "ok",
+      "render": "agent",
+      "content": "",
+      "notice": "kstack v2.0.0 is available (you're on v1.0.0). Say \"upgrade kstack\" to install, or \"dismiss\" to hide until the next release."
+    },
+    {
+      "kstack": "1",
+      "status": "error",
+      "kind": "user",
+      "message": "Unknown flag `--foo`. Run `/cluster-status --help` for usage."
+    },
+    {
+      "kstack": "1",
+      "status": "error",
+      "kind": "infra",
+      "message": "Unable to list pods for context `prod`. kubectl exited non-zero."
+    }
+  ]
+}

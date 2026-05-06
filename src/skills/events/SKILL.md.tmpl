@@ -1,0 +1,54 @@
+---
+name: {{SKILL_NAME}}
+description: Recent events, ranked by severity and deduplicated
+---
+
+{{ENTRYPOINT}}
+
+{{GLOBAL_FLAGS}}
+
+{{PREAMBLE}}
+
+## Purpose
+
+Pull recent Kubernetes events and collapse them into a short, ranked list — Warning events first, then notable Normal events, suppressing chatty noise (Pulled, Created, Started, Scheduled). Read-only; never mutates cluster state. The summary is bounded so the first response is cheap; the full event list stays in a per-context JSON cache for drill-in.
+
+## Arguments
+
+This skill takes no positional arguments. If the user supplies one, respond with the missing/unknown-argument error line defined in the Global flags section and stop.
+
+## Skill flags
+
+- `--refresh` — Fetch most recent data, bypassing and refreshing the cache. Default: `false`.
+- `--ttl <duration>` — Only update the cache if older than this (kubectl-style: `1m`, `5m`, `1h`). Default: `5m`. Ignored when `--refresh` is set.
+
+## Workflow
+
+The entrypoint dispatches to `{{SKILL_DIR}}/scripts/main`, which fetches `kubectl get events --all-namespaces` (caching the raw JSON to `events.json` per-context) and emits a ranked summary as a `render: verbatim` envelope. Per the entrypoint contract, print the envelope's `content` verbatim and end the turn. The envelope's top-level `kube_context` field identifies the cluster — pin it for follow-up calls per the entrypoint partial. Its `agent_context` is a compact JSON string `{"cache_dir":"<dir>"}`; parse it (don't display it) and remember `cache_dir` for follow-ups.
+
+Output shape:
+
+    Events: <ctx> · <span> · <N warning groups, M notable | none>
+
+    WARN  <ns>/<kind>              <reason>            <count>×  <age> ago  "<message>"
+    NOTE  <ns>/<kind>              <reason>            <count>×  <age> ago  "<message>"
+
+    …and <N> Normal events (Pulled, Created, Started, Scheduled) suppressed.
+
+    Snapshot cached (TTL 5m). Ask to drill in — e.g. "only payments", "events on pod/checkout-7c9", "show suppressed".
+
+When the window is clean, the output says "No Warning or notable Normal events in the current window."
+
+## Follow-ups on the cached snapshot
+
+The summary collapses chatty Normal reasons and truncates detail. When the user asks for more — or anything answerable from the cached event list — do **not** re-run `/events`. Instead:
+
+1. Read `cache_dir/events.json` (the raw `kubectl get events -A -o json` output — core `v1` Event objects).
+2. Use `jq` to filter, group, or inspect — by namespace, reason, type, or involved object.
+3. When the user asks about "events on `pod/X`", walk owners one level up (`Pod` → `ReplicaSet` → `Deployment`, `Pod` → `Job` → `CronJob`) so events against the controller aren't missed. Check `.involvedObject.name` against both the pod name and names of its owner references.
+4. When the user asks to "show suppressed" or "show Normal events", surface all events where `.type == "Normal"` and `.reason` is in the chatty set (`Pulled`, `Pulling`, `Created`, `Started`, `Scheduled`, `SuccessfulCreate`).
+5. When the user asks about a specific namespace (e.g. "only payments"), filter with `select(.metadata.namespace == "payments")`.
+
+If the user asks for something not in the cache (container output, specific resource YAML, root-cause across multiple sources), route to the appropriate skill — `/logs` for container output behind a `BackOff` or `CrashLoopBackOff`, `/investigate <kind>/<ns>/<name>` when a single resource becomes the focus — rather than widening this skill.
+
+If the user says "refresh" / "fetch again" / "re-check", re-invoke the skill with `--refresh`.

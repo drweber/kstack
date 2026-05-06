@@ -1,0 +1,6 @@
+# Verify /audit-security flags the wildcard Role and names it.
+rubric:
+  must_mention:
+    - "wildcard-role"
+    - "wildcard"
+  must_not_mention: []

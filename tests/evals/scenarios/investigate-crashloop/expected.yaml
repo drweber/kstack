@@ -1,0 +1,12 @@
+# Verify /investigate names the pod, identifies the backoff state
+# (`BackOff` matches both kubelet's event reason "BackOff" and the
+# container status reason "CrashLoopBackOff" as a substring), and
+# surfaces the planted error from `--previous` logs (the only place
+# the message lives, since the current container restarts before
+# producing output worth fetching).
+rubric:
+  must_mention:
+    - "checkout-api"
+    - "BackOff"
+    - "DATABASE_URL"
+  must_not_mention: []

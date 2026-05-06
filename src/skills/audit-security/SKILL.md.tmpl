@@ -1,0 +1,60 @@
+---
+name: {{SKILL_NAME}}
+description: RBAC, pod security posture, privilege tightening
+---
+
+{{ENTRYPOINT}}
+
+{{GLOBAL_FLAGS}}
+
+{{PREAMBLE}}
+
+## Purpose
+
+Find over-privileged identities and workloads: ServiceAccounts with more access than they use, pods running as root or with host-level escapes, and bindings that grant cluster-wide power where a namespace-scoped role would do. Read-only — queries the Kubernetes API only; no exec, no log access.
+
+## Arguments
+
+Optional natural-language scope. Examples:
+
+- `/audit-security` — full sweep across all three workflows.
+- `/audit-security rbac` — run a single workflow by name (`rbac`, `pods`, `secrets`).
+- `/audit-security pods in kube-system` — workflow plus namespace / label-selector / workload filter.
+
+Flag-shaped tokens that aren't documented in Global flags must trigger the unknown-flag error line. Bare text is an intent hint, not an error.
+
+## Workflow 1: RBAC
+
+Fetch in one shot: `kubectl get clusterroles,roles,clusterrolebindings,rolebindings -o json --context=<pinned>` plus either `-A` (full sweep) or `-n <ns>` for the namespaced kinds when the user gave a namespace scope. Cluster-scoped kinds (`clusterroles`, `clusterrolebindings`) ignore `-n` — that's expected; still include them to catch cluster-wide bindings that target the scoped namespace. From the JSON, find:
+
+- ClusterRoles and Roles granting wildcard verbs or wildcard resources (`*`) — including `resources: ["*"]`, `verbs: ["*"]`, and `apiGroups: ["*"]`.
+- Bindings to `cluster-admin` and other high-power built-in roles (`admin`, `edit`, `system:masters`).
+- `RoleBinding` and `ClusterRoleBinding` whose subjects no longer exist (dangling references — User/Group subjects can't be verified, but `ServiceAccount` subjects must resolve to a live SA in the named namespace).
+
+RBAC checks here are **static**: they describe what Roles *grant*, not what subjects *use*. Detecting truly unused permissions requires audit-log analysis, which this skill does not do. State this explicitly when reporting.
+
+## Workflow 2: Pod security
+
+Fetch with `kubectl get pods -o json --context=<pinned>`, plus `-A` (full sweep) or `-n <ns> [-l <selector>]` when the user scoped to a namespace, label, or workload. Walk each pod's `spec` and `spec.containers[*].securityContext` for:
+
+- Containers running as root (`runAsUser: 0`, or `runAsNonRoot` unset/false on both pod and container), missing `securityContext` entirely, or `allowPrivilegeEscalation: true`.
+- Pods with `privileged: true`, `hostNetwork: true`, `hostPID: true`, or `hostIPC: true` — these are host-level escapes and rank above almost everything else.
+- Writable root filesystems (`readOnlyRootFilesystem` unset or false) and dangerous Linux capabilities added (`SYS_ADMIN`, `NET_ADMIN`, `SYS_PTRACE`, etc.).
+- Missing `seccompProfile`, and workloads that would fail the upstream Pod Security Standards `baseline` or `restricted` profiles.
+
+Reference: <https://kubernetes.io/docs/concepts/security/pod-security-standards/>.
+
+## Workflow 3: Secrets & ServiceAccount tokens
+
+- Orphaned `Secrets` with no consumer — not mounted by any pod, not referenced by an `imagePullSecrets` entry, not bound to a ServiceAccount.
+- Pods with `automountServiceAccountToken: true` (the default) whose ServiceAccount has no RoleBindings or ClusterRoleBindings — the token mounts but grants nothing, and is a stealable credential for no reason.
+- Long-lived legacy `kubernetes.io/service-account-token` Secrets still present on the cluster (the projected-token mechanism replaces them since v1.24).
+
+Reference `Secret` objects by **name, namespace, and type only**. Never read, decode, or surface their contents — not even to confirm a value looks empty.
+
+## Reporting
+
+- Rank findings by **blast radius**: cluster-scoped wildcards above namespace-scoped ones; host escapes above missing seccomp profiles; bindings to `cluster-admin` above bindings to `edit`.
+- One line per finding explaining **why it matters** — what the privilege actually enables (e.g. "wildcard `secrets` verbs let this SA read every Secret cluster-wide, including SA tokens"), not just the offending verb or flag.
+- Group findings by workflow, then by severity. If a workflow finds nothing, say so in one line — don't print an empty section.
+- Hand off to `/investigate <kind>/<ns>/<name>` for a specific workload, and to `/audit-network` for mTLS and mesh posture (which sits adjacent to pod security).

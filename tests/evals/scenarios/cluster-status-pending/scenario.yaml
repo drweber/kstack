@@ -1,0 +1,12 @@
+id: cluster-status-pending
+skill: cluster-status
+description: >
+  Verifies that /cluster-status detects an unschedulable pod. Plants a pod
+  requesting more CPU than the kind node has, which goes Pending immediately.
+namespace: eval-cluster-status-pending
+runs: 3
+pass_threshold: 2
+wait_seconds: 0
+claude_flags:
+  model: ""
+  allowed_tools: "Bash"

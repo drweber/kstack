@@ -1,0 +1,6 @@
+# Placeholder rubric — keyword-only, no structured/judge checks. Just
+# verifies the harness can apply a fixture, run Claude, and score output.
+rubric:
+  must_mention:
+    - "hello"
+  must_not_mention: []

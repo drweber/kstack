@@ -1,0 +1,18 @@
+# A minimal Prometheus stand-in. The skill's source-detection probe only
+# needs a Service named "prometheus" exposing port 9090 to flag the
+# source as available — we don't need a real Prometheus serving PromQL
+# for the agent to choose it as the briefed source. The endpoints stay
+# empty since no pod backs the service; that's fine for this scenario.
+apiVersion: v1
+kind: Service
+metadata:
+  name: prometheus
+  labels:
+    app.kubernetes.io/name: prometheus
+spec:
+  selector:
+    app.kubernetes.io/name: prometheus
+  ports:
+    - name: web
+      port: 9090
+      targetPort: 9090

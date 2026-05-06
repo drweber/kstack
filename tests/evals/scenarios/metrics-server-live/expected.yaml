@@ -1,0 +1,9 @@
+# Verify /metrics queries metrics-server and reports usage for the
+# planted pod. The agent must name the pod and surface the source
+# (per the SKILL.md rule: label live snapshots `source: metrics-server`
+# so the reader knows the answer is point-in-time, not windowed).
+rubric:
+  must_mention:
+    - "cpu-burner"
+    - "metrics-server"
+  must_not_mention: []

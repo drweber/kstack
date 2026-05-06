@@ -1,0 +1,8 @@
+# Happy-path check: verify /cluster-status emits the expected summary structure.
+# Keyword-only — no structured or judge scoring needed for this baseline scenario.
+rubric:
+  must_mention:
+    - "Nodes"
+    - "Pods"
+    - "Ready"
+  must_not_mention: []

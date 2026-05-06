@@ -1,0 +1,6 @@
+# Verify /audit-security flags the legacy SA-token Secret by name and type.
+rubric:
+  must_mention:
+    - "legacy-sa-token"
+    - "kubernetes.io/service-account-token"
+  must_not_mention: []

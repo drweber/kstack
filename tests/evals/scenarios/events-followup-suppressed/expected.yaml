@@ -1,0 +1,21 @@
+# Verify the agent reads cache_dir/events.json to surface suppressed Normal
+# events. The pod name "quiet-sleeper" never appears in the /events summary
+# itself (chatty Normals are collapsed into a count), so it only shows up
+# if the agent actually drills into the cache as the SKILL.md prescribes.
+rubric:
+  must_mention:
+    - "quiet-sleeper"
+    - "Scheduled"
+  must_not_mention: []
+  judge_criteria: |
+    The response must satisfy ALL of these criteria:
+    1. It runs /events once and then answers the follow-up by reading the
+       cached events.json file at the cache_dir path returned by the skill
+       (typically via `cat`, `jq`, or similar against a path under the
+       kstack cache directory). It must NOT re-invoke /events to answer
+       the follow-up, and must NOT call `kubectl get events` directly to
+       answer the follow-up.
+    2. It lists at least one suppressed Normal event for pod
+       quiet-sleeper, naming the reason (e.g. Scheduled, Pulled, Created,
+       or Started).
+    Fail if either criterion is violated.

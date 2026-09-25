@@ -22,6 +22,7 @@ Once you install kstack you'll have access to these skills inside Claude Code:
 **Monitoring**
 * `/cluster-status` — Health snapshot (pod restarts, node conditions, resource pressure)
 * `/events` — Recent events, ranked by severity
+* `/alerts` — Firing alerts from Alertmanager, with silences and inhibitions resolved
 
 **Troubleshooting**
 * `/investigate` — Root-cause analysis across events, logs, and related resources
@@ -140,6 +141,29 @@ Recent cluster events, grouped by reason and ranked by severity so the signal is
 - `--ttl <duration>` — only update the cache if older than `<duration>` (default: `5m`)
 
 **Reference:** [kstack.sh/reference/skills/events](https://kstack.sh/reference/skills/events)
+
+</dd>
+<dt>
+
+#### `/alerts`
+
+</dt>
+<dd>
+
+What Alertmanager is holding right now — firing alerts grouped by severity, with silences and inhibitions resolved so "nothing is wrong" is distinguishable from "someone muted it".
+
+**What it checks:** every alert Alertmanager knows about (`active`, `suppressed`, `unprocessed`), grouped by `(alertname, namespace, severity)` and ranked `critical` → `warning` → `info`, most recent first. Suppressed alerts collapse into a tail line split by cause (silenced vs. inhibited), and the always-firing routing canaries (`Watchdog`, `InfoInhibitor`) collapse into another. Silences that are actually muting something are listed with their comment, author, and expiry.
+
+**How it works:** finds the Alertmanager `Service` by label (`app.kubernetes.io/name=alertmanager`, `app=alertmanager`) or by name, skipping the headless `-operated` peer-discovery Service, then reads `/api/v2/alerts` and `/api/v2/silences` through the API server's service proxy (`kubectl get --raw`) — no port-forward, no helper pod, nothing created in the cluster. Both payloads are written to a per-context cache. Grouping and ranking happen client-side. Follow-ups ("only critical", "alerts in payments", "who silenced that one") are answered by reading the cache with `jq`. Creating or expiring a silence is a write and is out of scope — the skill hands you the `amtool` command instead. For root cause behind an alert it hands off to [`/investigate`](#investigate); for the series a rule fires on, [`/metrics`](#metrics).
+
+**Requirements:** an in-cluster Alertmanager, and RBAC to `get services/proxy` in its namespace.
+
+**Options:**
+- `--refresh` — fetch most recent data, bypassing and refreshing the cache (default: `false`)
+- `--ttl <duration>` — only update the cache if older than `<duration>` (default: `2m`)
+- `--service <ns>/<name>[:<port>]` — read this Service instead of auto-discovering one (port defaults to `9093`)
+
+**Reference:** [kstack.sh/reference/skills/alerts](https://kstack.sh/reference/skills/alerts)
 
 </dd>
 

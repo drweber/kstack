@@ -1,0 +1,18 @@
+id: alerts-firing-grouped
+skill: alerts
+description: >
+  Verifies that /alerts finds an Alertmanager through the API server's
+  service proxy and reports its state the way the skill briefs: firing
+  alerts grouped and severity-ranked, suppressed ones collapsed into a
+  tail line, and the always-on Watchdog canary hidden rather than
+  reported as a problem. The fixture serves the two Alertmanager v2
+  endpoints the skill reads from a busybox httpd backed by a ConfigMap,
+  so the payload is fixed — a real Alertmanager with no rules loaded
+  would report nothing to grade.
+namespace: eval-alerts-firing-grouped
+runs: 3
+pass_threshold: 2
+wait_seconds: 120
+claude_flags:
+  model: ""
+  allowed_tools: "Bash"

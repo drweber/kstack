@@ -1,0 +1,375 @@
+#!/usr/bin/env bash
+
+# Copyright 2026 The Kubetail Authors
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+set -u
+
+# Bootstrap before anything that could fail: we need response::* to emit
+# any error envelope back to the agent.
+if [ -z "${KSTACK_ROOT:-}" ]; then
+  printf '{"kstack":"1","status":"error","kind":"infra","message":"KSTACK_ROOT not set; run this script via the skill entrypoint."}\n'
+  exit 0
+fi
+
+# shellcheck source=/dev/null
+. "$KSTACK_ROOT/lib/response.sh"
+# shellcheck source=/dev/null
+. "$KSTACK_ROOT/lib/kube-cache.sh"
+
+if [ -z "${KSTACK_KUBE_CONTEXT:-}" ]; then
+  response::infra_error "KSTACK_KUBE_CONTEXT not set; run this script via the skill entrypoint."
+  exit 0
+fi
+
+# Resolved Alertmanager coordinates, filled in by resolve_target and read by
+# am_die when a proxy read fails.
+AM_NS=""
+AM_NAME=""
+AM_PORT=""
+AM_TARGET=""
+
+# am_die <noun>
+#   Emit an infra-error envelope for a failed Alertmanager proxy read and
+#   exit 0. The API server returns the upstream error on stderr, which
+#   kube-cache collects into $KUBE_CACHE_DIR/_err.
+am_die() {
+  local noun="$1" detail="" err_file="$KUBE_CACHE_DIR/_err"
+  if [ -f "$err_file" ]; then
+    detail="$(head -1 "$err_file")"
+    detail="${detail:+ ($detail)}"
+  fi
+  # shellcheck disable=SC2016  # backticks render as inline code in markdown
+  response::infra_error "$(printf 'Unable to read %s from Alertmanager at `%s`%s. Check that the Service is reachable and that you can `get services/proxy` in namespace `%s`.' \
+    "$noun" "$AM_TARGET" "$detail" "$AM_NS")"
+  exit 0
+}
+
+# parse_service_override <value>
+#   Parse a user-supplied `<ns>/<name>[:<port>]` into AM_NS/AM_NAME/AM_PORT.
+#   Returns 1 on malformed input.
+parse_service_override() {
+  local value="$1" rest
+  case "$value" in
+    */*) ;;
+    *) return 1 ;;
+  esac
+  AM_NS="${value%%/*}"
+  rest="${value#*/}"
+  case "$rest" in
+    *:*) AM_NAME="${rest%%:*}"; AM_PORT="${rest##*:}" ;;
+    *)   AM_NAME="$rest";       AM_PORT="9093" ;;
+  esac
+  [ -n "$AM_NS" ] && [ -n "$AM_NAME" ] || return 1
+  # Reject anything non-numeric: the value lands in a proxy URL path segment.
+  [ "$AM_PORT" -eq "$AM_PORT" ] 2>/dev/null || return 1
+  case "$AM_NS$AM_NAME" in
+    */*) return 1 ;;
+  esac
+  return 0
+}
+
+# discover_service
+#   Pick the Alertmanager Service out of the cached service list. Matches on
+#   the well-known `app.kubernetes.io/name` / `app` labels first, then on a
+#   name containing "alertmanager", and skips headless Services (the
+#   `-operated` peer-discovery Service an Operator creates alongside the real
+#   one can't be proxied). Prints "<ns>\t<name>\t<port>\t<total matches>";
+#   prints nothing when the cluster has no match.
+discover_service() {
+  jq -r '
+    [ .items[]
+      | select((.spec.clusterIP // "") != "None")
+      | select(
+          (((.metadata.labels // {})["app.kubernetes.io/name"] // "") | ascii_downcase) == "alertmanager"
+          or (((.metadata.labels // {})["app"] // "") | ascii_downcase) == "alertmanager"
+          or (.metadata.name | test("alertmanager"; "i"))
+        )
+      | . as $svc
+      | ((.spec.ports // [])
+          | (map(select(.port == 9093)) | first)
+            // (map(select(((.name // "") | test("^(http-)?web$")))) | first)
+            // first
+        ) as $port
+      | select($port != null)
+      | { ns: $svc.metadata.namespace, name: $svc.metadata.name, port: $port.port }
+    ]
+    | sort_by(.ns, .name)
+    | if length == 0 then empty
+      else "\(.[0].ns)\t\(.[0].name)\t\(.[0].port)\t\(length)"
+      end
+  ' "$KUBE_CACHE_DIR/services.json" 2>/dev/null
+}
+
+# no_alertmanager_response
+#   Emit the "nothing to talk to" envelope. This is a clean run, not an
+#   error: the cluster simply has no Alertmanager for us to read.
+no_alertmanager_response() {
+  local content
+  content="Alerts: $KUBE_CACHE_CONTEXT · no Alertmanager detected"
+  content+=$'\n\n'"No Service matching Alertmanager was found. Looked for an \`app.kubernetes.io/name=alertmanager\` or \`app=alertmanager\` label, or a name containing \"alertmanager\", on a non-headless Service."
+  content+=$'\n\n'"If Alertmanager runs under a different name, point at it directly with \`--service=<namespace>/<name>\` (add \`:<port>\` when it isn't 9093). For cluster symptoms without Alertmanager, try \`/events\`."
+  response::ok_verbatim "$content"
+  exit 0
+}
+
+main() {
+  local ttl="2m" refresh="false" svc_override=""
+  while [ $# -gt 0 ]; do
+    case "$1" in
+      --refresh) refresh="true"; shift ;;
+      --ttl=*) ttl="${1#--ttl=}"; shift ;;
+      --ttl)
+        if [ $# -lt 2 ]; then
+          response::user_error "Flag --ttl requires a value."
+          exit 0
+        fi
+        ttl="$2"; shift 2 ;;
+      --service=*) svc_override="${1#--service=}"; shift ;;
+      --service)
+        if [ $# -lt 2 ]; then
+          response::user_error "Flag --service requires a value."
+          exit 0
+        fi
+        svc_override="$2"; shift 2 ;;
+      *)
+        response::user_error "Unknown flag \`$1\`. Run \`/${KSTACK_SKILL_NAME:-alerts} --help\` for usage."
+        exit 0 ;;
+    esac
+  done
+
+  if ! command -v kubectl >/dev/null 2>&1; then
+    response::infra_error "kubectl not found on PATH."
+    exit 0
+  fi
+  if ! command -v jq >/dev/null 2>&1; then
+    response::infra_error "jq not found on PATH."
+    exit 0
+  fi
+
+  local init_args=(--ttl="$ttl")
+  [ "$refresh" = "true" ] && init_args+=(--refresh)
+  if ! kube_cache::init "${init_args[@]}"; then
+    case "$KUBE_CACHE_ERROR_KIND" in
+      user) response::user_error "$KUBE_CACHE_ERROR" ;;
+      *)    response::infra_error "$KUBE_CACHE_ERROR" ;;
+    esac
+    exit 0
+  fi
+
+  local snapshot_start
+  snapshot_start="$(date +%s)"
+
+  # --- Resolve which Alertmanager to read -----------------------------------
+  local peers=1
+  if [ -n "$svc_override" ]; then
+    if ! parse_service_override "$svc_override"; then
+      response::user_error "Invalid --service value \`$svc_override\`. Use \`<namespace>/<name>\` or \`<namespace>/<name>:<port>\`."
+      exit 0
+    fi
+  else
+    kube_cache::ensure_list services --all-namespaces || kube_cache::die 'services'
+    local match
+    match="$(discover_service)"
+    [ -n "$match" ] || no_alertmanager_response
+    AM_NS="$(printf '%s' "$match" | cut -f1)"
+    AM_NAME="$(printf '%s' "$match" | cut -f2)"
+    AM_PORT="$(printf '%s' "$match" | cut -f3)"
+    peers="$(printf '%s' "$match" | cut -f4)"
+  fi
+  AM_TARGET="$AM_NS/$AM_NAME:$AM_PORT"
+
+  # --- Read alerts + silences through the API server's service proxy --------
+  # Keyed by target so pointing --service at a second Alertmanager doesn't
+  # read the first one's snapshot back out of the cache.
+  local key alerts_file silences_file
+  key="$(hash::short_sha "$AM_TARGET")"
+  alerts_file="$KUBE_CACHE_DIR/alertmanager-$key-alerts.json"
+  silences_file="$KUBE_CACHE_DIR/alertmanager-$key-silences.json"
+
+  local proxy="/api/v1/namespaces/$AM_NS/services/$AM_NAME:$AM_PORT/proxy/api/v2"
+  kube_cache::ensure_raw "alertmanager-$key-alerts" \
+    "$proxy/alerts?active=true&silenced=true&inhibited=true&unprocessed=true" \
+    || am_die 'alerts'
+  kube_cache::ensure_raw "alertmanager-$key-silences" "$proxy/silences" \
+    || am_die 'silences'
+
+  local now
+  now="$(date +%s)"
+
+  local err_tmp
+  err_tmp="$(mktemp 2>/dev/null || echo "/tmp/kstack-al-err-$$")"
+  # shellcheck disable=SC2064  # expand err_tmp now so trap fires with the right value
+  trap "rm -f '$err_tmp'" EXIT
+
+  local content
+  if ! content="$(jq -r \
+    --argjson now "$now" \
+    --arg ctx "$KUBE_CACHE_CONTEXT" \
+    --arg am "$AM_TARGET" \
+    --argjson peers "$peers" \
+    --slurpfile sil "$silences_file" '
+
+    def ts_to_epoch(ts):
+      if ts == "" or ts == null then 0
+      else (try (ts[0:19] | strptime("%Y-%m-%dT%H:%M:%S") | mktime) catch 0)
+      end;
+
+    def format_age(secs):
+      if secs <= 0 then "?"
+      elif secs < 60 then "\(secs)s"
+      elif secs < 3600 then "\(secs / 60 | floor)m"
+      elif secs < 86400 then "\(secs / 3600 | floor)h"
+      else "\(secs / 86400 | floor)d"
+      end;
+
+    def padright(n; s):
+      (s | .[0:n]) as $t |
+      (n - ($t | length)) as $p |
+      $t + (if $p > 0 then " " * $p else "" end);
+
+    # Prometheus convention; anything else sorts last but still renders.
+    def sev_rank(s):
+      if s == "critical" then 0 elif s == "warning" then 1
+      elif s == "info" then 2 else 3 end;
+    def sev_tag(s):
+      if s == "critical" then "CRIT" elif s == "warning" then "WARN"
+      elif s == "info" then "INFO" else "ALRT" end;
+
+    ($sil[0] // []) as $silences |
+
+    [ .[] | {
+        alertname:  (.labels.alertname // "unnamed"),
+        namespace:  (.labels.namespace // ""),
+        severity:   ((.labels.severity // "") | ascii_downcase),
+        suppressed: ((.status.state // "active") == "suppressed"),
+        silenced:   (((.status.silencedBy  // []) | length) > 0),
+        inhibited:  (((.status.inhibitedBy // []) | length) > 0),
+        silence_ids: (.status.silencedBy // []),
+        epoch:      ts_to_epoch(.startsAt // ""),
+        summary:    (.annotations.summary // .annotations.description // .annotations.message // "")
+      } ] |
+
+    group_by([.alertname, .namespace, .severity, .suppressed]) |
+    map({
+      alertname:  .[0].alertname,
+      namespace:  .[0].namespace,
+      severity:   .[0].severity,
+      suppressed: .[0].suppressed,
+      canary:     ((.[0].alertname == "Watchdog") or (.[0].alertname == "InfoInhibitor")),
+      count:      length,
+      epoch:      ([.[].epoch] | max),
+      summary:    (sort_by(.epoch) | last | .summary),
+      n_silenced:  ([.[] | select(.silenced)]  | length),
+      n_inhibited: ([.[] | select(.inhibited)] | length),
+      silence_ids: ([.[].silence_ids[]] | unique)
+    }) |
+    map(. + {
+      age_str: (if .epoch > 0 then "\(format_age($now - .epoch)) ago" else "?" end),
+      label:   (if .namespace == "" then .alertname else "\(.namespace)/\(.alertname)" end)
+    }) |
+
+    . as $groups |
+    ([$groups[] | select((.suppressed | not) and (.canary | not))]
+       | sort_by([sev_rank(.severity), -.epoch]))                                        as $firing |
+    ([$groups[] | select(.suppressed)])                                                  as $muted |
+    ([$groups[] | select((.suppressed | not) and .canary)])                              as $canaries |
+    (([$firing[].count]   | add) // 0)                                                   as $n_firing |
+    (([$muted[].count]    | add) // 0)                                                   as $n_muted |
+    (([$canaries[].count] | add) // 0)                                                   as $n_canary |
+    (([$muted[].n_silenced]  | add) // 0)                                                as $n_silenced |
+    (([$muted[].n_inhibited] | add) // 0)                                                as $n_inhibited |
+    ([$firing[] | select(.severity == "critical") | .count] | add // 0)                  as $n_crit |
+
+    (
+      [
+        if $n_firing > 0
+        then "\($n_firing) firing\(if $n_crit > 0 then " (\($n_crit) critical)" else "" end)"
+        else empty end,
+        if $n_muted > 0 then "\($n_muted) suppressed" else empty end
+      ] | if length == 0 then "none" else join(", ") end
+    ) as $summary |
+
+    # Only silences that are actually muting something earn a line.
+    ([$muted[].silence_ids[]] | unique) as $active_ids |
+    ([ $silences[]
+       | select(((.status.state // "") == "active") and (.id as $i | $active_ids | index($i)))
+       | { comment:    (.comment // ""),
+           created_by: (.createdBy // "unknown"),
+           ends_epoch: ts_to_epoch(.endsAt // "") }
+     ] | sort_by(.ends_epoch)) as $shown_silences |
+
+    ([ (if $n_muted > 0
+        then "…and \($n_muted) suppressed (\($n_silenced) silenced, \($n_inhibited) inhibited)."
+        else empty end),
+       (if $n_canary > 0
+        then "…and \($n_canary) always-on canar\(if $n_canary == 1 then "y" else "ies" end) hidden (\([$canaries[].alertname] | unique | join(", ")))."
+        else empty end)
+     ]) as $tails |
+
+    def fmt_row(g):
+      padright(34; g.label)         as $n |
+      padright(4;  "\(g.count)×")   as $c |
+      padright(9;  g.age_str)       as $a |
+      ((g.summary | .[0:80]) + (if (g.summary | length) > 80 then "…" else "" end)) as $m |
+      "\(sev_tag(g.severity))  \($n) \($c)  \($a)  \"\($m)\"";
+
+    def fmt_silence(s):
+      "  \"\(s.comment | .[0:60])\" by \(s.created_by)" +
+      (if s.ends_epoch > $now then " — ends in \(format_age(s.ends_epoch - $now))" else "" end);
+
+    (
+      [ "Alerts: \($ctx) · \($am) · \($summary)", "" ]
+      + (
+        if ($groups | length) == 0 then ["No alerts in Alertmanager right now."]
+        elif ($firing | length) == 0 then ["Nothing firing."]
+        else [$firing[] | fmt_row(.)]
+        end
+      )
+      + (if ($tails | length) > 0 then [""] + $tails else [] end)
+      + (if ($shown_silences | length) > 0
+         then [ "", "Active silences:" ]
+              + [ $shown_silences[0:5][] | fmt_silence(.) ]
+              + (if ($shown_silences | length) > 5
+                 then ["  …and \(($shown_silences | length) - 5) more."] else [] end)
+         else [] end)
+      + (if $peers > 1
+         then ["", "Note: \($peers) Alertmanager Services matched — read \($am). Use --service to pick another."]
+         else [] end)
+    ) | .[]
+
+  ' "$alerts_file" 2>"$err_tmp")"; then
+    # shellcheck disable=SC2016  # backticks render as inline code in markdown
+    response::infra_error "$(printf 'Alertmanager at `%s` returned a response kstack could not parse (%s).' \
+      "$AM_TARGET" "$(head -1 "$err_tmp")")"
+    exit 0
+  fi
+
+  local freshness
+  freshness="$(kube_cache::freshness_line "$snapshot_start" "$ttl" "$alerts_file" "$silences_file")"
+  content+=$'\n\n'"$freshness"$' Ask to drill in — e.g. "only critical", "alerts in payments", "show the silenced ones".'
+
+  local dir_esc alerts_esc silences_esc am_esc agent_ctx
+  dir_esc="$(printf '%s'      "$KUBE_CACHE_DIR" | response::_escape)"
+  alerts_esc="$(printf '%s'   "$alerts_file"    | response::_escape)"
+  silences_esc="$(printf '%s' "$silences_file"  | response::_escape)"
+  am_esc="$(printf '%s'       "$AM_TARGET"      | response::_escape)"
+  agent_ctx="$(printf '{"cache_dir":"%s","alerts_file":"%s","silences_file":"%s","alertmanager":"%s"}' \
+    "$dir_esc" "$alerts_esc" "$silences_esc" "$am_esc")"
+
+  response::ok_verbatim "$content" "$agent_ctx"
+  exit 0
+}
+
+main "$@"

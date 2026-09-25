@@ -37,6 +37,7 @@ exec shellcheck --severity=warning --external-sources \
   scripts/install \
   src/bin/check-update src/bin/dismiss-update src/bin/entrypoint src/bin/uninstall src/bin/upgrade \
   src/lib/*.sh scripts/*.sh \
+  src/skills/alerts/scripts/main \
   src/skills/cluster-status/scripts/main \
   src/skills/cluster-status/scripts/lib/*.sh \
   src/skills/events/scripts/main \

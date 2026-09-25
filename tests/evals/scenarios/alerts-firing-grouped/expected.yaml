@@ -1,0 +1,14 @@
+# The skill renders a verbatim summary, so the graded response should carry
+# it through. We check the three behaviors that distinguish /alerts from a
+# raw dump of the Alertmanager API:
+#   - the two crash-loop alerts are grouped under one alertname
+#   - suppressed alerts are reported as suppressed, not as firing
+#   - Watchdog is named as a hidden canary rather than a real problem
+# "critical" appears in the header's firing count as well as the severity.
+rubric:
+  must_mention:
+    - "KubePodCrashLooping"
+    - "critical"
+    - "suppressed"
+    - "Watchdog"
+  must_not_mention: []

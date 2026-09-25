@@ -1,0 +1,102 @@
+# A stand-in for Alertmanager: busybox httpd serving the two v2 endpoints
+# /alerts reads (`/api/v2/alerts`, `/api/v2/silences`) out of a ConfigMap.
+# The skill only ever GETs those two paths through the API server's service
+# proxy, so a static responder exercises the real code path while keeping
+# the graded payload fixed. Query strings are ignored by httpd, which is
+# fine — the skill filters client-side.
+#
+# The payload is shaped to cover every bucket the summary distinguishes:
+# two instances of one critical alert (must group into a single row), one
+# warning, one silenced, one inhibited, and the always-firing Watchdog.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: fake-alertmanager-api
+data:
+  alerts: |
+    [
+     {"labels":{"alertname":"KubePodCrashLooping","namespace":"payments","severity":"critical","pod":"checkout-7c9"},
+      "annotations":{"summary":"Pod payments/checkout-7c9 is in a crash loop"},
+      "startsAt":"2026-01-01T09:40:00.000Z",
+      "status":{"state":"active","silencedBy":[],"inhibitedBy":[]},
+      "fingerprint":"aaaa1111"},
+     {"labels":{"alertname":"KubePodCrashLooping","namespace":"payments","severity":"critical","pod":"checkout-8d1"},
+      "annotations":{"summary":"Pod payments/checkout-8d1 is in a crash loop"},
+      "startsAt":"2026-01-01T09:45:00.000Z",
+      "status":{"state":"active","silencedBy":[],"inhibitedBy":[]},
+      "fingerprint":"aaaa2222"},
+     {"labels":{"alertname":"TargetDown","namespace":"monitoring","severity":"warning","job":"kubelet"},
+      "annotations":{"description":"30% of the kubelet targets are down"},
+      "startsAt":"2026-01-01T09:00:00.000Z",
+      "status":{"state":"active","silencedBy":[],"inhibitedBy":[]},
+      "fingerprint":"bbbb1111"},
+     {"labels":{"alertname":"NodeFilesystemAlmostFull","severity":"warning","instance":"10.0.3.14:9100"},
+      "annotations":{"summary":"Filesystem on 10.0.3.14 has 3% space left"},
+      "startsAt":"2026-01-01T08:00:00.000Z",
+      "status":{"state":"suppressed","silencedBy":["11111111-1111-1111-1111-111111111111"],"inhibitedBy":[]},
+      "fingerprint":"cccc1111"},
+     {"labels":{"alertname":"KubeNodeUnreachable","severity":"warning","node":"kind-worker"},
+      "annotations":{"summary":"kind-worker is unreachable"},
+      "startsAt":"2026-01-01T08:30:00.000Z",
+      "status":{"state":"suppressed","silencedBy":[],"inhibitedBy":["aaaa1111"]},
+      "fingerprint":"dddd1111"},
+     {"labels":{"alertname":"Watchdog","severity":"none"},
+      "annotations":{"description":"An alert that should always be firing to certify that Alertmanager is working."},
+      "startsAt":"2026-01-01T07:00:00.000Z",
+      "status":{"state":"active","silencedBy":[],"inhibitedBy":[]},
+      "fingerprint":"eeee1111"}
+    ]
+  silences: |
+    [
+     {"id":"11111111-1111-1111-1111-111111111111",
+      "status":{"state":"active"},
+      "comment":"Planned disk expansion on the storage nodes",
+      "createdBy":"sre@example.com",
+      "matchers":[{"name":"alertname","value":"NodeFilesystemAlmostFull","isRegex":false,"isEqual":true}],
+      "startsAt":"2026-01-01T07:00:00.000Z","endsAt":"2099-01-01T12:00:00.000Z"}
+    ]
+---
+apiVersion: v1
+kind: Pod
+metadata:
+  name: fake-alertmanager
+  labels:
+    app.kubernetes.io/name: alertmanager
+spec:
+  containers:
+    - name: httpd
+      image: busybox:latest
+      command: ["httpd", "-f", "-p", "9093", "-h", "/www"]
+      ports:
+        - name: http-web
+          containerPort: 9093
+      volumeMounts:
+        - name: api
+          mountPath: /www/api/v2
+      resources:
+        requests:
+          cpu: 10m
+          memory: 16Mi
+  volumes:
+    - name: api
+      configMap:
+        name: fake-alertmanager-api
+        items:
+          - key: alerts
+            path: alerts
+          - key: silences
+            path: silences
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: alertmanager
+  labels:
+    app.kubernetes.io/name: alertmanager
+spec:
+  selector:
+    app.kubernetes.io/name: alertmanager
+  ports:
+    - name: http-web
+      port: 9093
+      targetPort: 9093

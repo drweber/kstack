@@ -100,6 +100,26 @@ setup() {
   [ "$status" -eq 0 ]
 }
 
+# The partial is inlined verbatim into every rendered SKILL.md, so a canonical
+# attack string quoted here as an illustration ships to every install and trips
+# the deterministic prompt-injection scanners some host agents run over their
+# context files. Describe the shape of an injection instead of reproducing one.
+@test "preamble does not quote canonical injection strings that scanners flag" {
+  local pattern
+  for pattern in \
+    "ignore (previous|prior|all|the above) instructions" \
+    "disregard (your|previous|all|the above) (rules|instructions)" \
+    "do ?n.?o?t tell the user" \
+    "system prompt override" \
+    "exfiltrat"
+  do
+    if grep -E -i -q "$pattern" "$PARTIAL"; then
+      echo "preamble reproduces an injection string scanners match on: /$pattern/"
+      return 1
+    fi
+  done
+}
+
 # ---------------------------------------------------------------------------
 # Wiring: every skill template inlines {{PREAMBLE}}
 # ---------------------------------------------------------------------------

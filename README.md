@@ -325,6 +325,13 @@ Outdated cluster components, known CVEs, and available version bumps. Looks for 
 **Reference:** [kstack.sh/reference/skills/audit-outdated](https://kstack.sh/reference/skills/audit-outdated)
 
 </dd>
+</dl>
+
+---
+
+### Autoscaling
+
+<dl>
 <dt>
 
 #### `/karpenter`

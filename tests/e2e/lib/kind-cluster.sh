@@ -21,8 +21,9 @@
 # down the same `kstack-test` cluster the same way.
 #
 # Env:
-#   KSTACK_KIND_CLUSTER   name of the kind cluster (default: kstack-test)
-#   KSTACK_REUSE_CLUSTER  if =1, adopt an existing cluster and skip teardown
+#   KSTACK_KIND_CLUSTER     name of the kind cluster (default: kstack-test)
+#   KSTACK_KIND_NODE_IMAGE  node image to boot (default: the pin below)
+#   KSTACK_REUSE_CLUSTER    if =1, adopt an existing cluster and skip teardown
 #
 # Functions (all use $KUBECONFIG_PATH_VAR to let callers choose where to
 # stash the kubeconfig; defaults to a file under the caller's tmpdir):
@@ -41,6 +42,16 @@
 #     Delete the cluster unless KSTACK_REUSE_CLUSTER=1.
 
 KSTACK_KIND_CLUSTER="${KSTACK_KIND_CLUSTER:-kstack-test}"
+
+# Pin the Kubernetes version the cluster tiers run against. Without --image,
+# kind boots whatever its own release happens to default to, so the tested
+# server version changes silently whenever the kind pin moves. The digest is
+# kind's own recommendation — a tag can be re-pushed, a digest can't.
+#
+# To bump: take the node image and digest from the release notes of the kind
+# version installed in .github/workflows/ci.yml, and move KUBECTL_VERSION there
+# to the same minor.
+KSTACK_KIND_NODE_IMAGE="${KSTACK_KIND_NODE_IMAGE:-kindest/node:v1.37.0@sha256:a1ed56cfb0e7b93589bdf97c8cd566405a265939e3620fc4f5de89adff580ae5}"
 
 _kstack_require_cmd() {
   command -v "$1" >/dev/null 2>&1
@@ -77,7 +88,8 @@ kstack_kind_up() {
     echo "# adopting existing kind cluster: $KSTACK_KIND_CLUSTER" >&2
   else
     echo "# creating kind cluster: $KSTACK_KIND_CLUSTER" >&2
-    kind create cluster --name "$KSTACK_KIND_CLUSTER" --wait 90s >&2
+    kind create cluster --name "$KSTACK_KIND_CLUSTER" \
+      --image "$KSTACK_KIND_NODE_IMAGE" --wait 90s >&2
   fi
 
   kind get kubeconfig --name "$KSTACK_KIND_CLUSTER" > "$kubeconfig"

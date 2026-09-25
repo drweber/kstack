@@ -18,8 +18,6 @@
 # to pass clean. Called by CI and runnable locally.
 #
 # Requires shellcheck (brew install shellcheck, or apt install shellcheck).
-# `.bats` files are intentionally excluded for now — they have SC2164/SC2314
-# findings that need to be cleaned up before they can join the lint set.
 set -eu
 
 REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
@@ -33,7 +31,7 @@ if ! command -v shellcheck >/dev/null 2>&1; then
 fi
 
 # Keep this list in sync with CLAUDE.md ("lint" description).
-exec shellcheck --severity=warning --external-sources \
+shellcheck --severity=warning --external-sources \
   scripts/install \
   src/bin/check-update src/bin/dismiss-update src/bin/entrypoint src/bin/uninstall src/bin/upgrade \
   src/lib/*.sh scripts/*.sh \
@@ -49,3 +47,12 @@ exec shellcheck --severity=warning --external-sources \
   tests/e2e/setup_suite.bash \
   tests/e2e/lib/*.sh \
   tests/evals/lib/*.sh
+
+# Second pass for the test suites. A `.bats` file carries a
+# `#!/usr/bin/env bats` shebang that shellcheck can't resolve to a dialect, so
+# the shell is named explicitly — kept off the run above so those files keep
+# using their own shebangs and `shellcheck shell=` directives.
+exec shellcheck --severity=warning --external-sources --shell=bash \
+  tests/unit/*.bats \
+  tests/integration/*.bats \
+  tests/e2e/*.bats

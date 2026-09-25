@@ -81,6 +81,9 @@ The e2e and eval tiers stand up a kind cluster (`kstack-test`) and require Docke
 # Reuse the cluster across runs during dev loops
 KSTACK_REUSE_CLUSTER=1 ./scripts/test-e2e.sh
 
+# Test against a different Kubernetes version than the pinned default
+KSTACK_KIND_NODE_IMAGE=kindest/node:v1.34.0 ./scripts/test-e2e.sh
+
 # Eval tier — additionally requires ANTHROPIC_API_KEY, `claude`, `jq`, `yq`
 ./scripts/test-evals.sh
 

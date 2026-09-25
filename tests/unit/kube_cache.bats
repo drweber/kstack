@@ -31,6 +31,7 @@ setup() {
 # _stub_kubectl emits a stub kubectl that logs every invocation to
 # $KUBECTL_LOG and responds to:
 #   `… version …`            → {"serverVersion":{"gitVersion":"v1.30.0"}}
+#   `… get --raw <path> …`   → {"raw":"<path>"}
 #   `… get <resource> …`     → {"kind":"List","resource":"<resource>"}
 _stub_kubectl() {
   use_mocks
@@ -40,6 +41,8 @@ _stub_kubectl() {
 echo \"\$@\" >> '$KUBECTL_LOG'
 args=\"\$*\"
 case \"\$args\" in
+  *--raw*) p=\"\${args#*--raw }\"; p=\"\${p%% *}\"
+     printf '{\"raw\":\"%s\"}\n' \"\$p\" ;;
   *version*) printf '{\"serverVersion\":{\"gitVersion\":\"v1.30.0\"}}\n' ;;
   *) r=\"\${args#*get }\"; r=\"\${r%% *}\"
      printf '{\"kind\":\"List\",\"resource\":\"%s\"}\n' \"\$r\" ;;
@@ -189,6 +192,39 @@ esac
   kube_cache::init
   kube_cache::ensure_version
   grep -q "v1.30.0" "$KUBE_CACHE_DIR/cluster.json"
+}
+
+@test "ensure_raw: writes <name>.json from the given API path" {
+  _stub_kubectl
+  kube_cache::init
+  kube_cache::ensure_raw am-alerts \
+    "/api/v1/namespaces/monitoring/services/alertmanager:9093/proxy/api/v2/alerts"
+  local f="$KUBE_CACHE_DIR/am-alerts.json"
+  [ -f "$f" ]
+  grep -q 'proxy/api/v2/alerts' "$f"
+  grep -q -- '--raw' "$KUBECTL_LOG"
+}
+
+@test "ensure_raw: skips kubectl when file is fresh" {
+  _stub_kubectl
+  kube_cache::init --ttl=1h
+  kube_cache::ensure_raw am-alerts /healthz
+  local first
+  first="$(wc -l < "$KUBECTL_LOG")"
+  kube_cache::ensure_raw am-alerts /healthz
+  local second
+  second="$(wc -l < "$KUBECTL_LOG")"
+  [ "$first" = "$second" ]
+}
+
+@test "ensure_raw: returns non-zero when kubectl fails and leaves no stale file" {
+  use_mocks
+  write_stub kubectl 'exit 7'
+  kube_cache::init
+  run kube_cache::ensure_raw am-alerts /healthz
+  [ "$status" -ne 0 ]
+  [ ! -f "$KUBE_CACHE_DIR/am-alerts.json" ]
+  [ ! -f "$KUBE_CACHE_DIR/am-alerts.json.tmp" ]
 }
 
 @test "path: returns <dir>/<name>.json without fetching" {

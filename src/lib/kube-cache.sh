@@ -184,6 +184,19 @@ kube_cache::ensure_version() {
     kubectl --context="$KUBE_CACHE_CONTEXT" version -o json
 }
 
+# kube_cache::ensure_raw <name> <api_path>
+#   Write $KUBE_CACHE_DIR/<name>.json from
+#   `kubectl --context=<ctx> get --raw <api_path>` when stale. For endpoints
+#   the typed `get` verb can't reach — notably the API server's service proxy
+#   (/api/v1/namespaces/<ns>/services/<svc>:<port>/proxy/…), which lets a
+#   skill read an in-cluster HTTP API without a port-forward or a helper pod.
+#   Returns non-zero on kubectl failure (caller handles reporting).
+kube_cache::ensure_raw() {
+  local name="$1" api_path="$2"
+  _kube_cache::ensure_file "$KUBE_CACHE_DIR/$name.json" \
+    kubectl --context="$KUBE_CACHE_CONTEXT" get --raw "$api_path"
+}
+
 # kube_cache::path <name>
 #   Print the cache path for a snapshot by filename stem (e.g. "pods",
 #   "nodes", "cluster"). Does not fetch; readers pair this with ensure_*.

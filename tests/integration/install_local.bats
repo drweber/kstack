@@ -43,7 +43,7 @@ setup_file() {
 
 setup() {
   load '../test_helper.bash'
-  cd "$PROJECT"
+  cd "$PROJECT" || return 1
 }
 
 @test "install --local clones bare repo into \$PWD/.kstack/upstream at latest tag" {

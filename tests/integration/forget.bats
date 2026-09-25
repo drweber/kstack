@@ -116,8 +116,10 @@ state_exists() {
   seed_state "test-ctx"
   run main
   [ "$status" -eq 0 ]
-  ! cache_exists "test-ctx"
-  ! state_exists "test-ctx"
+  run cache_exists "test-ctx"
+  [ "$status" -ne 0 ]
+  run state_exists "test-ctx"
+  [ "$status" -ne 0 ]
 }
 
 @test "does not touch other contexts" {
@@ -126,7 +128,8 @@ state_exists() {
   seed_state "other-ctx"
   run main
   [ "$status" -eq 0 ]
-  ! cache_exists "test-ctx"
+  run cache_exists "test-ctx"
+  [ "$status" -ne 0 ]
   cache_exists "other-ctx"
   state_exists "other-ctx"
 }
@@ -148,8 +151,10 @@ state_exists() {
   run main --all
   [ "$status" -eq 0 ]
   [[ "$output" == *"Forgot local state for all contexts"* ]]
-  ! cache_exists "ctx-a"
-  ! cache_exists "ctx-b"
+  run cache_exists "ctx-a"
+  [ "$status" -ne 0 ]
+  run cache_exists "ctx-b"
+  [ "$status" -ne 0 ]
 }
 
 @test "--all: clears state for every context" {
@@ -157,8 +162,10 @@ state_exists() {
   seed_state "ctx-b"
   run main --all
   [ "$status" -eq 0 ]
-  ! state_exists "ctx-a"
-  ! state_exists "ctx-b"
+  run state_exists "ctx-a"
+  [ "$status" -ne 0 ]
+  run state_exists "ctx-b"
+  [ "$status" -ne 0 ]
 }
 
 @test "--all: clears mixed cache and state across contexts" {
@@ -166,8 +173,10 @@ state_exists() {
   seed_state "ctx-b"
   run main --all
   [ "$status" -eq 0 ]
-  ! cache_exists "ctx-a"
-  ! state_exists "ctx-b"
+  run cache_exists "ctx-a"
+  [ "$status" -ne 0 ]
+  run state_exists "ctx-b"
+  [ "$status" -ne 0 ]
 }
 
 # ---------------------------------------------------------------------------

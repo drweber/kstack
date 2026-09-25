@@ -31,7 +31,7 @@ setup() {
   "$REAL_GIT" init --quiet --bare "$BARE_REPO"
   "$REAL_GIT" -c init.defaultBranch=main init --quiet "$work"
   (
-    cd "$work"
+    cd "$work" || return 1
     "$REAL_GIT" config user.email "test@example.com"
     "$REAL_GIT" config user.name "Test"
     mkdir -p scripts

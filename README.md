@@ -431,7 +431,7 @@ At Kubetail, we're building the most **user-friendly**, **cost-effective**, and 
 * React frontend development
 * Reporting issues and suggesting features
 
-See [CONTRIBUTING.md](CONTRIBUTING.md) for development setup and guidelines. Reach us at hello@kubetail.com, or join our [Discord server](https://discord.gg/CmsmWAVkvX) or [Slack channel](https://join.slack.com/t/kubetail/shared_invite/zt-2cq01cbm8-e1kbLT3EmcLPpHSeoFYm1w).
+See [CONTRIBUTING.md](CONTRIBUTING.md) for development setup and guidelines, and open a [bug report](https://github.com/kubetail-org/kstack/issues/new?template=bug_report.md) or a [feature request](https://github.com/kubetail-org/kstack/issues/new?template=feature_request.md) when you hit something. Reach us at hello@kubetail.com, or join our [Discord server](https://discord.gg/CmsmWAVkvX) or [Slack channel](https://join.slack.com/t/kubetail/shared_invite/zt-2cq01cbm8-e1kbLT3EmcLPpHSeoFYm1w).
 
 ## Notes
 

@@ -8,6 +8,7 @@ This document will guide you through the contribution process.
 
 - [Where to Find Code](#where-to-find-code)
 - [How to Run Tests and Other Checks](#how-to-run-tests-and-other-checks)
+- [Filing an Issue](#filing-an-issue)
 - [Commit Guidelines](#commit-guidelines)
 - [Pull Request Guidelines](#pull-request-guidelines)
 - [Branch Naming Guidelines](#branch-naming-guidelines)
@@ -97,6 +98,24 @@ make install
 # Wipe gitignored install artifacts so install runs against a clean tree
 make clean
 ```
+
+## Filing an Issue
+
+For anything larger than a typo — and especially for a new skill, where the shape of the answer matters more than the code — an issue first saves everyone time.
+
+Opening one offers two templates:
+
+- **Bug report** — a skill misbehaved, the installer failed, or something doesn't match the docs.
+- **Feature or skill request** — a new skill, or something an existing skill should also handle.
+
+Usage questions get a faster answer on [Discord](https://discord.gg/CmsmWAVkvX) or in the [Kubernetes Slack channel](https://kubernetes.slack.com/archives/C08SHG1GR37). Security vulnerabilities go to hello@kubetail.com rather than a public issue — see [SECURITY.md](./SECURITY.md).
+
+Two details are specific to kstack and worth including up front:
+
+- **Which skill**, plus the installed version — `cat ~/.config/kstack/manifest/version` for a global install, `cat .kstack/manifest/version` for local or dev.
+- **Which agent CLI**, since skills render per agent into that agent's own skills directory.
+
+One caution: skill output carries real cluster detail — namespaces, workload and node names, labels. Redact anything you'd rather not publish before pasting it.
 
 ## Commit Guidelines
 

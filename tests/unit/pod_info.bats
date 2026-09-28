@@ -61,12 +61,11 @@ crashing_pod() {
 }
 
 succeeded_pod() {
-  local ns="${1:-default}" name="${2:-job-pod}"
   printf '{
-    "metadata":{"namespace":"%s","name":"%s"},
+    "metadata":{"namespace":"default","name":"job-pod"},
     "spec":{"containers":[{"name":"c"}]},
     "status":{"phase":"Succeeded","containerStatuses":[{"ready":false,"restartCount":0}]}
-  }' "$ns" "$name"
+  }'
 }
 
 pods_list() {

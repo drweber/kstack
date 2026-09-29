@@ -104,7 +104,8 @@ setup() {
 # attack string quoted here as an illustration ships to every install and trips
 # the deterministic prompt-injection scanners some host agents run over their
 # context files. Describe the shape of an injection instead of reproducing one.
-@test "preamble does not quote canonical injection strings that scanners flag" {
+@test "preamble declares cluster data to be data, not instructions" {
+  run grep -E -i "(is|are) data, not instruction" "$PARTIAL"
   local pattern
   for pattern in \
     "ignore (previous|prior|all|the above) instructions" \

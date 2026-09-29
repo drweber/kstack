@@ -92,3 +92,22 @@ An install materializes `{{ROOT_DIR}}/{bin,lib,cache,state,manifest}` — `~/.co
 The bats helper `tests/test_helper.bash` exposes two root vars: `REPO_ROOT` resolves to the repo top (where `install`, `scripts/`, and `src/` live), and `SRC_ROOT` resolves to `$REPO_ROOT/src` — the installer payload that tests reference as `$SRC_ROOT/lib/…`, `$SRC_ROOT/bin/…`, etc.
 
 When adding a helper under `src/bin/` or a partial under `src/skills/_partials/`, add a test that exercises it through `install`, not just via direct invocation — the rendering pipeline is where most regressions land.
+
+## Contributing
+
+[`CONTRIBUTING.md`](./CONTRIBUTING.md) is the source of truth. This summary exists because its "AI-Assisted Editors" section sends agents *here* for guidance, so an agent that reads only this file would otherwise miss the rules below — including the disclosure one.
+
+- **Before proposing a change**, run `./scripts/lint.sh` and `./scripts/test.sh`; add `./scripts/test-e2e.sh` when the change touches cluster behavior.
+- **Commits** use [Conventional Commits](https://www.conventionalcommits.org) with an all-lowercase title, and are signed off — the DCO check is required:
+
+      git commit -s -m "<type>(<scope>): <title>"
+
+- **AI assistance must be disclosed.** The AI policy does not accept contributions authored entirely by an LLM, and asks for a trailer on every commit an AI tool helped with:
+
+      git commit -s --trailer "Assisted-by: AGENT_NAME:MODEL_VERSION" -m "<message>"
+
+- **PR titles** carry a type emoji: 🎣 bug fix, 🐋 new feature, 📜 documentation, ✨ general improvement. The body follows `.github/pull_request_template.md` and links the issue (`Closes #N`).
+- **Branches** are named `<type>/<short-description>`.
+- **Issues** use the templates in `.github/ISSUE_TEMPLATE/`.
+
+Adding a skill touches more places than the template alone: a `SKILL.md.tmpl`, a matching `#### /<skill>` section in the repo-root `README.md` (without it `render_help` fails the install), an entry in `scripts/lint.sh` if it ships a `scripts/main`, and integration tests that exercise it through `install` rather than by direct invocation.

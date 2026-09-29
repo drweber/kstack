@@ -1,0 +1,11 @@
+blank_issues_enabled: true
+contact_links:
+  - name: Question or discussion
+    url: https://discord.gg/CmsmWAVkvX
+    about: Usage questions and general chat get a faster answer on Discord.
+  - name: Kubernetes Slack
+    url: https://kubernetes.slack.com/archives/C08SHG1GR37
+    about: Find the kstack maintainers on the Kubernetes workspace.
+  - name: Security vulnerability
+    url: https://github.com/kubetail-org/kstack/blob/main/SECURITY.md
+    about: Please email hello@kubetail.com instead of opening a public issue.

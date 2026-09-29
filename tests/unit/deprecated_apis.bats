@@ -212,6 +212,8 @@ The **extensions/v1beta1** API version of Deployment is no longer served as of v
 
 @test "version_lt: basic comparisons" {
   _deprecated_apis::version_lt "1.21" "1.22"
-  ! _deprecated_apis::version_lt "1.22" "1.22"
-  ! _deprecated_apis::version_lt "1.23" "1.22"
+  run _deprecated_apis::version_lt "1.22" "1.22"
+  [ "$status" -ne 0 ]
+  run _deprecated_apis::version_lt "1.23" "1.22"
+  [ "$status" -ne 0 ]
 }

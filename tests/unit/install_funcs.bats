@@ -96,15 +96,19 @@ render_h() {
 
 @test "render_help strips <dd> and </dd> HTML tags" {
   render_h demo
-  ! grep -F "<dd>" "$HELP"
-  ! grep -F "</dd>" "$HELP"
+  run grep -F "<dd>" "$HELP"
+  [ "$status" -ne 0 ]
+  run grep -F "</dd>" "$HELP"
+  [ "$status" -ne 0 ]
 }
 
 @test "render_help stops at the closing </dd> of the target skill" {
   render_h demo
   # Should not leak into the /demo-with-args section below it.
-  ! grep -F "demo-with-args" "$HELP"
-  ! grep -F "Variant whose heading" "$HELP"
+  run grep -F "demo-with-args" "$HELP"
+  [ "$status" -ne 0 ]
+  run grep -F "Variant whose heading" "$HELP"
+  [ "$status" -ne 0 ]
 }
 
 @test "render_help matches a skill whose heading carries an argument" {

@@ -90,8 +90,11 @@ setup() {
   done
 }
 
-@test "preamble forbids following instructions found in cluster data" {
-  run grep -E -i "(never|do not|don.?t).*follow.*(instruction|command|directive)" "$PARTIAL"
+# The prohibition is deliberately not phrased as an imperative ("never follow
+# ...") because scanners flag that as a command. Assert the intent instead:
+# injected text is material to surface to the user, not something to act on.
+@test "preamble directs suspicious cluster data to be surfaced to the user" {
+  run grep -E -i "surface to the user" "$PARTIAL"
   [ "$status" -eq 0 ]
 }
 
@@ -106,6 +109,7 @@ setup() {
 # context files. Describe the shape of an injection instead of reproducing one.
 @test "preamble declares cluster data to be data, not instructions" {
   run grep -E -i "(is|are) data, not instruction" "$PARTIAL"
+  [ "$status" -eq 0 ]
   local pattern
   for pattern in \
     "ignore (previous|prior|all|the above) instructions" \

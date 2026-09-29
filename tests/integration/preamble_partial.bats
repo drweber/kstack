@@ -90,14 +90,39 @@ setup() {
   done
 }
 
-@test "preamble forbids following instructions found in cluster data" {
-  run grep -E -i "(never|do not|don.?t).*follow.*(instruction|command|directive)" "$PARTIAL"
+# The prohibition is deliberately not phrased as an imperative ("never follow
+# ...") because scanners flag that as a command. Assert the intent instead:
+# injected text is material to surface to the user, not something to act on.
+@test "preamble directs suspicious cluster data to be surfaced to the user" {
+  run grep -E -i "surface to the user" "$PARTIAL"
   [ "$status" -eq 0 ]
 }
 
 @test "preamble distinguishes the user's chat as the only trusted instruction source" {
   run grep -E -i "only.*(chat|user).*(trust|instruction)|user.?s chat.*trust" "$PARTIAL"
   [ "$status" -eq 0 ]
+}
+
+# The partial is inlined verbatim into every rendered SKILL.md, so a canonical
+# attack string quoted here as an illustration ships to every install and trips
+# the deterministic prompt-injection scanners some host agents run over their
+# context files. Describe the shape of an injection instead of reproducing one.
+@test "preamble declares cluster data to be data, not instructions" {
+  run grep -E -i "(is|are) data, not instruction" "$PARTIAL"
+  [ "$status" -eq 0 ]
+  local pattern
+  for pattern in \
+    "ignore (previous|prior|all|the above) instructions" \
+    "disregard (your|previous|all|the above) (rules|instructions)" \
+    "do ?n.?o?t tell the user" \
+    "system prompt override" \
+    "exfiltrat"
+  do
+    if grep -E -i -q "$pattern" "$PARTIAL"; then
+      echo "preamble reproduces an injection string scanners match on: /$pattern/"
+      return 1
+    fi
+  done
 }
 
 # ---------------------------------------------------------------------------
